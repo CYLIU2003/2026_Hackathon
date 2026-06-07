@@ -1,0 +1,3 @@
+timestamp,state,previous_state,event,bear_detected,paw_contact,contact_confirmed,raw_contact_value,honey_amount_percent,honey_enough,system_safe,emergency_stop,release_allowed,release_state,error_code,error_message
+T+0000ms,IDLE,IDLE,IDLE,false,false,false,,80,true,true,false,false,RELEASE_OFF,ERR_NONE,
+T+5000ms,RELEASING,READY_TO_RELEASE,RELEASE_START,true,true,true,,80,true,true,false,true,RELEASE_ON,ERR_NONE,
