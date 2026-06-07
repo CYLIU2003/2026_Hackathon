@@ -14,11 +14,17 @@ This module is only an additional perception layer. It does not replace the Ardu
 
 ## Setup
 
+Run commands from the repository root:
+
+```bash
+cd ~/Desktop/2026_Hackathon
+```
+
 Install camera tools on Raspberry Pi:
 
 ```bash
 sudo apt update
-sudo apt install -y v4l-utils
+sudo apt install -y python3-venv python3-pip v4l-utils libgl1 libglib2.0-0
 ```
 
 Check the camera:
@@ -30,10 +36,13 @@ v4l2-ctl --list-devices
 v4l2-ctl --device=/dev/video0 --all
 ```
 
-Install Python dependencies:
+Create a Python virtual environment and install Python dependencies:
 
 ```bash
-pip install -r raspberry_pi/camera_ai/requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r raspberry_pi/camera_ai/requirements.txt
 ```
 
 Place a small YOLO model at the path configured in `config.camera_ai.yaml`, for example:
@@ -44,17 +53,31 @@ models/yolo_bear.pt
 
 Model weights are intentionally ignored by Git.
 
+If you only want to confirm the camera first, the YOLO model is not required for
+`camera_test.py`. The model is required for `run_camera_ai.py`.
+
+If the camera does not open, make sure the user can access video devices:
+
+```bash
+groups
+sudo usermod -aG video $USER
+```
+
+Log out and log in again after adding the user to the `video` group.
+
 ## Camera Test
 
 Run one-frame capture with a camera index:
 
 ```bash
+source .venv/bin/activate
 python raspberry_pi/camera_ai/camera_test.py --camera 0
 ```
 
 Or with a Linux video device path:
 
 ```bash
+source .venv/bin/activate
 python raspberry_pi/camera_ai/camera_test.py --device /dev/video0
 ```
 
@@ -65,19 +88,29 @@ The script prints camera properties and saves one debug image under `data/debug_
 Use the default config:
 
 ```bash
+source .venv/bin/activate
 python raspberry_pi/camera_ai/run_camera_ai.py --config raspberry_pi/camera_ai/config.camera_ai.yaml
 ```
 
 Override camera and model:
 
 ```bash
+source .venv/bin/activate
 python raspberry_pi/camera_ai/run_camera_ai.py --camera 0 --model models/bear_yolo.pt
 ```
 
 Run one inference cycle:
 
 ```bash
+source .venv/bin/activate
 python raspberry_pi/camera_ai/run_camera_ai.py --device /dev/video0 --once
+```
+
+For a short smoke test without running forever:
+
+```bash
+source .venv/bin/activate
+python raspberry_pi/camera_ai/run_camera_ai.py --device /dev/video0 --max-iterations 5
 ```
 
 ## Output
@@ -114,3 +147,50 @@ The camera AI module does not command honey release. A future integration must s
 - Camera detection can be wrong; it is only a support signal.
 - Current integration publishes AI state only and does not modify the Arduino release decision.
 
+## Troubleshooting
+
+### `externally-managed-environment`
+
+Use the project virtual environment instead of system Python:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r raspberry_pi/camera_ai/requirements.txt
+```
+
+### `ImportError: libGL.so.1`
+
+Install the OpenCV runtime library:
+
+```bash
+sudo apt install -y libgl1
+```
+
+### `ERROR: camera could not be opened`
+
+Check the camera device and permissions:
+
+```bash
+lsusb
+ls /dev/video*
+v4l2-ctl --list-devices
+groups
+```
+
+Try another device path such as `/dev/video1` if multiple video devices are
+shown.
+
+### `AI_MODEL_LOAD_ERROR`
+
+Check that the model file exists at the configured path:
+
+```bash
+ls -lh models/yolo_bear.pt
+```
+
+Or pass the model path explicitly:
+
+```bash
+python raspberry_pi/camera_ai/run_camera_ai.py --model models/bear_yolo.pt --once
+```
