@@ -111,13 +111,30 @@ python -m pip install --upgrade pip
 python -m pip install -r raspberry_pi/camera_ai/requirements.txt
 ```
 
-Place a small YOLO model at the path configured in `config.camera_ai.yaml`, for example:
+Place a small YOLO model at the path configured in `config.camera_ai.yaml`:
 
 ```text
 models/yolo_bear.pt
 ```
 
 Model weights are intentionally ignored by Git.
+
+For prototype bring-up, this file may be a COCO-pretrained nano model. The
+filename can be `yolo_bear.pt` even while the contents are generic COCO weights:
+
+```bash
+mkdir -p models
+python - <<'PY'
+from ultralytics import YOLO
+YOLO("yolov8n.pt")
+print("downloaded / loaded yolov8n.pt")
+PY
+cp yolov8n.pt models/yolo_bear.pt
+```
+
+COCO includes the `bear` class. Stuffed toys may be detected as `teddy bear`
+instead of `bear`; that is acceptable for early camera/model smoke testing but
+not enough to command release.
 
 If you only want to confirm the camera first, the YOLO model is not required for
 `camera_test.py`. The model is required for `run_camera_ai.py`.
@@ -152,41 +169,47 @@ Run one-frame capture with a camera index:
 
 ```bash
 source .venv/bin/activate
-python raspberry_pi/camera_ai/camera_test.py --camera 0
+python raspberry_pi/camera_ai/camera_test.py
 ```
 
-Or with a Linux video device path:
+Or pass the target Linux video device path explicitly:
 
 ```bash
 source .venv/bin/activate
 python raspberry_pi/camera_ai/camera_test.py --device /dev/video0
 ```
 
-For the BUFFALO BSW500M USB camera on Raspberry Pi 4B, the default profile is
-set to a low-bandwidth headless profile to try first:
+For the BUFFALO BSW500M USB camera on Raspberry Pi 4B, `/dev/video0` is the
+image capture device. `/dev/video1` is metadata and must not be used by OpenCV.
+The default profile tries this first:
 
 ```text
-/dev/video0, YUYV, 320x240, 5 fps
+/dev/video0, MJPG, 640x480, 15 fps
 ```
 
-If the camera opens but captures no frame, try a different video node or pixel
-format:
+If this fails, the script automatically falls back to:
+
+```text
+/dev/video0, MJPG, 320x240, 15 fps
+/dev/video0, YUYV, 640x480, 15 fps
+/dev/video0, YUYV, 320x240, 15 fps
+```
+
+Check supported V4L2 formats before changing code:
 
 ```bash
 v4l2-ctl --list-devices
 v4l2-ctl --device=/dev/video0 --list-formats-ext
-python raspberry_pi/camera_ai/camera_test.py --device /dev/video1
-python raspberry_pi/camera_ai/camera_test.py --device /dev/video0 --fourcc YUYV --width 320 --height 240 --fps 5
 ```
 
-You can also let the test script try common USB camera settings:
+To force only one profile:
 
 ```bash
-python raspberry_pi/camera_ai/camera_test.py --device /dev/video0 --auto-profiles
-python raspberry_pi/camera_ai/camera_test.py --device /dev/video0 --backend any --auto-profiles
+python raspberry_pi/camera_ai/camera_test.py --device /dev/video0 --single-profile
 ```
 
-The script prints camera properties and saves one debug image under `data/debug_frames/`.
+The script prints available `/dev/video*` paths, selected width/height/fps/fourcc,
+the frame shape, and saves one image at `outputs/camera_test.jpg` by default.
 
 ## Run AI Detection
 
@@ -197,28 +220,28 @@ source .venv/bin/activate
 python raspberry_pi/camera_ai/run_camera_ai.py --config raspberry_pi/camera_ai/config.camera_ai.yaml
 ```
 
-The default config uses `/dev/video0`, `YUYV`, `320x240`, and `5 fps` for
-headless Raspberry Pi operation with the BUFFALO BSW500M camera.
+The default config uses `/dev/video0`, V4L2, `MJPG`, `640x480`, and `15 fps`,
+with fallback to `320x240 MJPG` and then `YUYV` profiles if frame capture fails.
 
 Override camera and model:
 
 ```bash
 source .venv/bin/activate
-python raspberry_pi/camera_ai/run_camera_ai.py --camera 0 --model models/bear_yolo.pt
+python -m raspberry_pi.camera_ai.run_camera_ai --device /dev/video0 --model models/bear_yolo.pt
 ```
 
 Run one inference cycle:
 
 ```bash
 source .venv/bin/activate
-python raspberry_pi/camera_ai/run_camera_ai.py --device /dev/video0 --once
+python -m raspberry_pi.camera_ai.run_camera_ai --device /dev/video0 --once
 ```
 
 For a short smoke test without running forever:
 
 ```bash
 source .venv/bin/activate
-python raspberry_pi/camera_ai/run_camera_ai.py --device /dev/video0 --max-iterations 5
+python -m raspberry_pi.camera_ai.run_camera_ai --device /dev/video0 --max-iterations 5
 ```
 
 ## Output
@@ -298,8 +321,8 @@ v4l2-ctl --list-devices
 groups
 ```
 
-Try another device path such as `/dev/video1` if multiple video devices are
-shown.
+For the target BUFFALO BSW500M setup, keep OpenCV on `/dev/video0`. Do not use
+`/dev/video1`; it is the metadata node.
 
 ### `ERROR: camera opened but no frame was captured`
 
@@ -315,16 +338,15 @@ v4l2-ctl --device=/dev/video0 --list-formats-ext
 Then try the most likely alternatives:
 
 ```bash
-python raspberry_pi/camera_ai/camera_test.py --device /dev/video0 --auto-profiles
-python raspberry_pi/camera_ai/camera_test.py --device /dev/video0 --backend any --auto-profiles
-python raspberry_pi/camera_ai/camera_test.py --device /dev/video1
-python raspberry_pi/camera_ai/camera_test.py --device /dev/video0 --fourcc YUYV
-python raspberry_pi/camera_ai/camera_test.py --device /dev/video0 --width 320 --height 240
+python raspberry_pi/camera_ai/camera_test.py --device /dev/video0
+python raspberry_pi/camera_ai/camera_test.py --device /dev/video0 --backend any
+python raspberry_pi/camera_ai/camera_test.py --device /dev/video0 --fourcc YUYV --single-profile
+python raspberry_pi/camera_ai/camera_test.py --device /dev/video0 --width 320 --height 240 --fourcc MJPG --single-profile
 ```
 
 If OpenCV still captures no frame, check whether V4L2 itself can stream from the
-USB camera. For the camera shown as `USB 2.0 Camera`, `/dev/video0` is usually
-the capture node and `/dev/video1` may be a metadata node.
+USB camera. For the target BUFFALO BSW500M setup, use `/dev/video0` as the
+capture node and leave the metadata node alone.
 
 ```bash
 v4l2-ctl --device=/dev/video0 --stream-mmap --stream-count=10 --stream-to=/tmp/camera-test.raw
@@ -391,7 +413,7 @@ v4l2-ctl --device=/dev/video0 \
 If it still fails, reload the UVC driver once and retry:
 
 ```bash
-fuser -v /dev/video0 /dev/video1
+fuser -v /dev/video0
 sudo modprobe -r uvcvideo
 sudo modprobe uvcvideo
 v4l2-ctl --device=/dev/video0 \
@@ -402,7 +424,7 @@ v4l2-ctl --device=/dev/video0 \
 Some non-compliant UVC cameras need a bandwidth quirk:
 
 ```bash
-fuser -v /dev/video0 /dev/video1
+fuser -v /dev/video0
 sudo modprobe -r uvcvideo
 sudo modprobe uvcvideo quirks=0x80
 v4l2-ctl --device=/dev/video0 \
@@ -420,7 +442,7 @@ If `modprobe: FATAL: Module uvcvideo is in use` appears, first find and stop
 users of the video devices:
 
 ```bash
-fuser -v /dev/video0 /dev/video1
+fuser -v /dev/video0
 fuser -v /dev/snd/*
 ```
 

@@ -1,15 +1,33 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
-from ai_state_publisher import AiState, AiStatePublisher
-from approach_logic import ApproachDetectionConfig, ApproachLogic
-from bear_detector import YoloBearDetector
+try:
+    from .ai_state_publisher import AiState, AiStatePublisher
+    from .approach_logic import ApproachDetectionConfig, ApproachLogic
+    from .bear_detector import YoloBearDetector
+    from .camera_capture import (
+        DEFAULT_CAMERA_DEVICE,
+        fallback_profiles,
+        open_camera_with_fallbacks,
+        read_frame_with_retries,
+        resolve_camera_source,
+    )
+except ImportError:
+    from ai_state_publisher import AiState, AiStatePublisher
+    from approach_logic import ApproachDetectionConfig, ApproachLogic
+    from bear_detector import YoloBearDetector
+    from camera_capture import (
+        DEFAULT_CAMERA_DEVICE,
+        fallback_profiles,
+        open_camera_with_fallbacks,
+        read_frame_with_retries,
+        resolve_camera_source,
+    )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -18,8 +36,17 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run camera AI bear approach detection.")
     parser.add_argument("--config", default="raspberry_pi/camera_ai/config.camera_ai.yaml")
-    parser.add_argument("--camera", type=int, default=None, help="OpenCV camera index override.")
-    parser.add_argument("--device", default=None, help="Linux video device path override.")
+    parser.add_argument(
+        "--camera",
+        type=int,
+        default=None,
+        help="Explicit OpenCV camera index override. Default uses /dev/video0.",
+    )
+    parser.add_argument(
+        "--device",
+        default=None,
+        help="Linux video device path override. Default and target hardware path is /dev/video0.",
+    )
     parser.add_argument("--model", default=None, help="YOLO model path override.")
     parser.add_argument("--once", action="store_true", help="Run one inference cycle and exit.")
     parser.add_argument("--max-iterations", type=int, default=None)
@@ -69,34 +96,24 @@ def config_path(path_value: str | Path) -> Path:
 def open_camera(camera_config: dict, camera_override: int | None, device_override: str | None):
     import cv2
 
-    if device_override:
-        camera_source: Any = device_override
-    elif camera_override is not None:
-        camera_source = camera_override
-    elif camera_config.get("device"):
-        camera_source = str(camera_config["device"])
-    else:
-        camera_source = int(camera_config.get("index", 0))
-
-    backend = cv2.CAP_V4L2 if os.name == "posix" else cv2.CAP_ANY
-    capture = cv2.VideoCapture(camera_source, backend)
-    fourcc = str(camera_config.get("fourcc", "MJPG"))
-    if fourcc:
-        capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc[:4]))
-    capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(camera_config.get("width", 640)))
-    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(camera_config.get("height", 480)))
-    capture.set(cv2.CAP_PROP_FPS, int(camera_config.get("fps", 15)))
-    capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    return capture, str(camera_source)
-
-
-def read_frame_with_retries(capture, *, retries: int = 1, retry_delay_sec: float = 0.1):
-    for _ in range(max(1, retries)):
-        ok, frame = capture.read()
-        if ok and frame is not None:
-            return ok, frame
-        time.sleep(max(0.0, retry_delay_sec))
-    return False, None
+    camera_source = resolve_camera_source(
+        camera_config,
+        camera_override=camera_override,
+        device_override=device_override,
+    )
+    backend_name = str(camera_config.get("backend", "v4l2"))
+    result, _ = open_camera_with_fallbacks(
+        cv2,
+        camera_source=camera_source,
+        backend_name=backend_name,
+        profiles=fallback_profiles(camera_config),
+        read_test=True,
+        retries=int(camera_config.get("read_retries", 3)),
+        retry_delay_sec=float(camera_config.get("retry_delay_sec", 0.1)),
+    )
+    if result is None:
+        return None, str(camera_source)
+    return result.capture, str(camera_source)
 
 
 def build_fail_safe_state(
@@ -194,7 +211,13 @@ def main() -> int:
             args.device,
         )
     except Exception:
-        camera_device = args.device or str(args.camera or config.get("camera", {}).get("device", "0"))
+        camera_config = config.get("camera", {})
+        camera_device = str(
+            args.device
+            or args.camera
+            or camera_config.get("device")
+            or DEFAULT_CAMERA_DEVICE
+        )
         publish_state(
             publisher,
             build_fail_safe_state(
@@ -207,7 +230,7 @@ def main() -> int:
         )
         return 1
 
-    if not capture.isOpened():
+    if capture is None or not capture.isOpened():
         publish_state(
             publisher,
             build_fail_safe_state(

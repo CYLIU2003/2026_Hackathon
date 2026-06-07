@@ -17,6 +17,11 @@ class YoloBearDetector:
         self.model_path = str(model_path)
         self.input_size = int(input_size)
         self.confidence_floor = float(confidence_floor)
+        if not Path(self.model_path).exists():
+            raise RuntimeError(
+                f"YOLO model file is missing: {self.model_path}. "
+                "Place a prototype COCO nano model at models/yolo_bear.pt."
+            )
 
         try:
             from ultralytics import YOLO
@@ -74,4 +79,3 @@ class YoloBearDetector:
         width = max(0.0, x2 - x1)
         height = max(0.0, y2 - y1)
         return min(1.0, (width * height) / float(frame_area))
-
