@@ -9,3 +9,7 @@ See `raspberry_pi/logger/README.md`.
 ## Dashboard
 
 See `raspberry_pi/dashboard/README.md`.
+
+## Camera AI
+
+See `raspberry_pi/camera_ai/README.md`.

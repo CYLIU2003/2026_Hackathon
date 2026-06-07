@@ -1,0 +1,31 @@
+camera:
+  device: "/dev/video0"
+  index: 0
+  width: 640
+  height: 480
+  fps: 15
+
+inference:
+  model_path: "models/yolo_bear.pt"
+  input_size: 320
+  inference_interval_sec: 0.5
+  use_display: false
+
+approach_detection:
+  target_classes:
+    - "bear"
+  confidence_threshold: 0.50
+  approach_area_ratio_threshold: 0.12
+  consecutive_required: 3
+  max_detection_age_sec: 2.0
+
+output:
+  jsonl_stdout: true
+  save_csv: true
+  csv_path: "data/logs/camera_ai_log.csv"
+  save_debug_frames: false
+  debug_frame_dir: "data/debug_frames"
+
+fail_safe:
+  default_ai_bear_approaching: false
+
