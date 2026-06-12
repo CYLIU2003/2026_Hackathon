@@ -1,9 +1,10 @@
 *.pt
 *.onnx
+*.tflite
+models/
 *.mp4
 *.avi
 data/logs/*.csv
 data/debug_frames/
 __pycache__/
 .venv/
-

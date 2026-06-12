@@ -10,7 +10,9 @@ Raspberry Pi 4B camera_ai
   |
   +-- camera_test.py: verify capture and save one debug frame
   |
-  +-- bear_detector.py: YOLO model wrapper, returns detections
+  +-- export_lightweight_yolo.py: export .pt to NCNN/TFLite/ONNX for Pi
+  |
+  +-- bear_detector.py: lightweight YOLO runtime wrapper, returns detections
   |
   +-- approach_logic.py: confidence, bbox area, consecutive detection
   |
@@ -27,6 +29,7 @@ The camera AI support signal is separate from the Arduino Uno Q contact-pad rele
 ```text
 Camera AI:
   - detect possible bear approach
+  - prefer Pi-friendly exported YOLO formats such as NCNN
   - publish ai_bear_approaching
   - fail safe to false on errors
 
@@ -54,3 +57,15 @@ AI_BEAR_APPROACHING:
 YOLO detection alone must never trigger honey release.
 The final release decision remains fail-safe and must still require contact confirmation, honey availability, system safety, and no emergency stop.
 
+## Raspberry Pi 4B Lightweight Profile
+
+```text
+camera capture: 320x240 MJPG at 10 fps
+YOLO input_size: 256
+primary model: models/yolo_bear_ncnn_model
+fallback models:
+  - models/yolo_bear_int8.tflite
+  - models/yolo_bear.onnx
+  - models/yolo_bear.pt
+inference interval: 0.75 sec
+```

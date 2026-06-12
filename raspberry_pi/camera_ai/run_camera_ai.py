@@ -81,6 +81,23 @@ def repo_path(path_value: str | Path) -> Path:
     return path if path.is_absolute() else REPO_ROOT / path
 
 
+def resolve_model_path(
+    inference_config: dict,
+    model_override: str | None = None,
+) -> Path:
+    if model_override:
+        return repo_path(model_override)
+
+    primary_model_path = inference_config.get("model_path", "models/yolo_bear_ncnn_model")
+    candidate_paths = [primary_model_path]
+    candidate_paths.extend(inference_config.get("fallback_model_paths", []))
+    resolved_candidates = [repo_path(candidate_path) for candidate_path in candidate_paths]
+    for candidate_path in resolved_candidates:
+        if candidate_path.exists():
+            return candidate_path
+    return resolved_candidates[0]
+
+
 def config_path(path_value: str | Path) -> Path:
     path = Path(path_value)
     if path.is_absolute():
@@ -244,11 +261,14 @@ def main() -> int:
         return 1
 
     inference_config = config.get("inference", {})
-    model_path = args.model or inference_config.get("model_path", "models/yolo_bear.pt")
+    model_path = resolve_model_path(inference_config, args.model)
     try:
         detector = YoloBearDetector(
-            repo_path(model_path),
-            input_size=int(inference_config.get("input_size", 320)),
+            model_path,
+            input_size=int(inference_config.get("input_size", 256)),
+            confidence_floor=float(inference_config.get("confidence_floor", 0.05)),
+            device=inference_config.get("device", "cpu"),
+            class_ids=inference_config.get("class_ids", []),
         )
     except Exception:
         capture.release()

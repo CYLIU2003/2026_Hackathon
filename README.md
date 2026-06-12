@@ -348,6 +348,7 @@ a1-front-paw-contact-pad/
 ├─ data/
 │  └─ logs/
 ├─ models/
+│  ├─ yolo_bear_ncnn_model/
 │  └─ yolo_bear.pt
 ├─ outputs/
 │  └─ camera_test.jpg
@@ -376,13 +377,24 @@ Hardware and runtime assumptions:
 - Camera: BUFFALO BSW500M USB web camera
 - Capture device: /dev/video0
 - Metadata device: /dev/video1, not for capture
-- Model path: models/yolo_bear.pt
-- Recommended resolution: 640x480 or 320x240
+- Primary model path: models/yolo_bear_ncnn_model
+- Fallback model path: models/yolo_bear.pt
+- Recommended resolution: 320x240 on Raspberry Pi 4B
 - Recommended FourCC: MJPG first, then YUYV fallback
 - Failure behavior: ai_bear_approaching=false
 ```
 
-If `models/yolo_bear.pt` is missing, the system outputs `AI_MODEL_LOAD_ERROR`, sets `ai_model_ok=false`, and remains fail-safe.
+If all configured model paths are missing, the system outputs `AI_MODEL_LOAD_ERROR`, sets `ai_model_ok=false`, and remains fail-safe.
+
+Lighten/export a nano `.pt` model for Raspberry Pi 4B:
+
+```bash
+python3 raspberry_pi/camera_ai/export_lightweight_yolo.py \
+  --source models/yolo_bear.pt \
+  --format ncnn \
+  --imgsz 256 \
+  --overwrite
+```
 
 Camera AI run commands:
 
@@ -415,7 +427,7 @@ fuser -v /dev/video0
 | `docs/` | Design documents, block diagram, state machine, interface specs, and camera AI notes. |
 | `data/logs/` | Runtime CSV/JSONL logs. Generated logs are normally kept out of Git except small samples. |
 | `examples/` | Small sample input/output files for demos and documentation. |
-| `models/` | Local YOLO model weights, expected path `models/yolo_bear.pt`. Not committed by default. |
+| `models/` | Local YOLO model weights and exports. Preferred path is `models/yolo_bear_ncnn_model`; `.pt` is fallback only. Not committed by default. |
 | `outputs/` | Generated camera test images and temporary demo outputs. Not committed by default. |
 | `scripts/` | Helper scripts for running demos. |
 | `tests/` | Python tests for decision logic and camera AI helper behavior. |
@@ -446,7 +458,7 @@ fuser -v /dev/video0
 ### Phase 3: YOLO Model Placement and AI Inference
 
 ```text
-[ ] Place models/yolo_bear.pt
+[ ] Place or export models/yolo_bear_ncnn_model
 [ ] Confirm AI_MODEL_LOAD_ERROR disappears
 [ ] Run YOLO inference on camera frames
 [ ] Publish ai_bear_approaching fail-safe output
@@ -562,7 +574,7 @@ This prototype uses **simulated sensor inputs** and does not require real sensor
 
 ### Raspberry Pi Camera AI
 
-1. Place a lightweight YOLO model at `models/yolo_bear.pt`.
+1. Export or place a lightweight YOLO model at `models/yolo_bear_ncnn_model`.
 2. Confirm the camera:
    ```bash
    python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0

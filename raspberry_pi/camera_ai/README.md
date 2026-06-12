@@ -111,13 +111,24 @@ python -m pip install --upgrade pip
 python -m pip install -r raspberry_pi/camera_ai/requirements.txt
 ```
 
-Place a small YOLO model at the path configured in `config.camera_ai.yaml`:
+Place a lightweight exported YOLO model at the primary path configured in
+`config.camera_ai.yaml`:
 
 ```text
-models/yolo_bear.pt
+models/yolo_bear_ncnn_model
 ```
 
-Model weights are intentionally ignored by Git.
+Model weights and exported runtime files are intentionally ignored by Git.
+
+The Raspberry Pi 4B 4GB profile uses:
+
+```text
+capture: 320x240 MJPG at 10 fps
+YOLO input_size: 256
+primary model: models/yolo_bear_ncnn_model
+fallbacks: models/yolo_bear_int8.tflite, models/yolo_bear.onnx, models/yolo_bear.pt
+inference interval: 0.75 sec
+```
 
 For prototype bring-up, this file may be a COCO-pretrained nano model. The
 filename can be `yolo_bear.pt` even while the contents are generic COCO weights:
@@ -135,6 +146,33 @@ cp yolov8n.pt models/yolo_bear.pt
 COCO includes the `bear` class. Stuffed toys may be detected as `teddy bear`
 instead of `bear`; that is acceptable for early camera/model smoke testing but
 not enough to command release.
+
+Export the `.pt` model into the lighter default NCNN runtime format:
+
+```bash
+source .venv/bin/activate
+python raspberry_pi/camera_ai/export_lightweight_yolo.py \
+  --source models/yolo_bear.pt \
+  --format ncnn \
+  --imgsz 256 \
+  --overwrite
+```
+
+The script places and prints the runtime path:
+
+```text
+models/yolo_bear_ncnn_model
+```
+
+If NCNN is not available in the current environment, export a fallback format:
+
+```bash
+python raspberry_pi/camera_ai/export_lightweight_yolo.py \
+  --source models/yolo_bear.pt \
+  --format onnx \
+  --imgsz 256 \
+  --overwrite
+```
 
 If you only want to confirm the camera first, the YOLO model is not required for
 `camera_test.py`. The model is required for `run_camera_ai.py`.
@@ -220,8 +258,8 @@ source .venv/bin/activate
 python raspberry_pi/camera_ai/run_camera_ai.py --config raspberry_pi/camera_ai/config.camera_ai.yaml
 ```
 
-The default config uses `/dev/video0`, V4L2, `MJPG`, `640x480`, and `15 fps`,
-with fallback to `320x240 MJPG` and then `YUYV` profiles if frame capture fails.
+The default config uses `/dev/video0`, V4L2, `MJPG`, `320x240`, and `10 fps`,
+with fallback profiles if frame capture fails.
 
 Override camera and model:
 
@@ -274,7 +312,8 @@ The camera AI module does not command honey release. A future integration must s
 ## Known Limitations
 
 - A YOLO model is not included in Git.
-- Raspberry Pi 4B should use small/nano models and low input sizes such as 320.
+- Raspberry Pi 4B should use nano models exported to NCNN/TFLite/ONNX and low
+  input sizes such as 256.
 - Camera detection can be wrong; it is only a support signal.
 - Current integration publishes AI state only and does not modify the Arduino release decision.
 
@@ -489,7 +528,7 @@ ls -lh /tmp/camera-test-320.raw
 Check that the model file exists at the configured path:
 
 ```bash
-ls -lh models/yolo_bear.pt
+ls -ld models/yolo_bear_ncnn_model
 ```
 
 Or pass the model path explicitly:

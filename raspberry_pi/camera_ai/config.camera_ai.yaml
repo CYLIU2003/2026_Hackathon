@@ -1,17 +1,24 @@
 camera:
   device: "/dev/video0"
   backend: "v4l2"
-  width: 640
-  height: 480
-  fps: 15
+  width: 320
+  height: 240
+  fps: 10
   fourcc: "MJPG"
   read_retries: 3
   retry_delay_sec: 0.1
 
 inference:
-  model_path: "models/yolo_bear.pt"
-  input_size: 320
-  inference_interval_sec: 0.5
+  model_path: "models/yolo_bear_ncnn_model"
+  fallback_model_paths:
+    - "models/yolo_bear_int8.tflite"
+    - "models/yolo_bear.onnx"
+    - "models/yolo_bear.pt"
+  input_size: 256
+  confidence_floor: 0.05
+  device: "cpu"
+  class_ids: []
+  inference_interval_sec: 0.75
   use_display: false
 
 approach_detection:

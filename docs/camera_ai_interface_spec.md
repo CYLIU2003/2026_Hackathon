@@ -65,6 +65,22 @@ ai_bear_approaching=false
 
 This module must not directly set `release_state` to `RELEASE_ON`.
 
+## Model Runtime Contract
+
+The Pi 4B 4GB runtime should prefer exported lightweight models over raw
+PyTorch weights:
+
+```text
+primary: models/yolo_bear_ncnn_model
+fallbacks:
+  - models/yolo_bear_int8.tflite
+  - models/yolo_bear.onnx
+  - models/yolo_bear.pt
+```
+
+If no configured model path exists or the model cannot be loaded, emit
+`AI_MODEL_LOAD_ERROR` and keep `ai_bear_approaching=false`.
+
 ## Future Integration
 
 Correct future integration style:
@@ -80,4 +96,3 @@ release_allowed = (
 ```
 
 The fields `paw_contact`, `raw_contact_value`, contact thresholds, `honey_amount_percent`, `system_safe`, `emergency_stop`, and `release_state` remain part of the existing contact-pad/release interface.
-
