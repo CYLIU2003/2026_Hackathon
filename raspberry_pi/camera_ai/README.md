@@ -282,6 +282,168 @@ source .venv/bin/activate
 python -m raspberry_pi.camera_ai.run_camera_ai --device /dev/video0 --max-iterations 5
 ```
 
+## Prepare Public Bear Training Data
+
+The training-data path is optional for the MVP runtime, but it lets the team
+fine-tune a small bear detector from public images before real local data is
+available.
+
+Prepare data on a PC first; do not install the dataset tooling on the Raspberry
+Pi unless you intentionally want to download and train there.
+Use Python 3.10 or newer for Ultralytics training and model export.
+
+```bash
+python raspberry_pi/camera_ai/prepare_bear_training_data.py \
+  --source coco2017 \
+  --max-images 80 \
+  --overwrite \
+  --package
+```
+
+The default path downloads public COCO 2017 `bear` detections, converts them to
+Ultralytics YOLO format, writes:
+
+```text
+data/datasets/bear_public_yolo/dataset.yaml
+```
+
+and, with `--package`, creates a Pi-copyable dataset ZIP:
+
+```text
+data/packages/bear_public_yolo_pi.zip
+```
+
+The generated dataset and ZIP are ignored by Git.
+The COCO annotation ZIP is cached under `data/datasets/_downloads/` and is not
+included in the Pi dataset package.
+
+If you want Open Images instead of COCO, install the optional FiftyOne dataset
+tooling and change the source:
+
+```bash
+python -m pip install -r raspberry_pi/camera_ai/requirements.dataset.txt
+python raspberry_pi/camera_ai/prepare_bear_training_data.py \
+  --source open-images-v7 \
+  --split-limit train=160 \
+  --split-limit validation=40 \
+  --overwrite \
+  --package
+```
+
+Train a lightweight prototype model:
+
+```bash
+python raspberry_pi/camera_ai/train_bear_yolo.py \
+  --data data/datasets/bear_public_yolo/dataset.yaml \
+  --imgsz 256 \
+  --epochs 30 \
+  --batch 8
+```
+
+The trained PyTorch model is copied to:
+
+```text
+models/yolo_bear.pt
+```
+
+Export it to the Raspberry Pi preferred runtime format:
+
+```bash
+python raspberry_pi/camera_ai/export_lightweight_yolo.py \
+  --source models/yolo_bear.pt \
+  --format ncnn \
+  --imgsz 256 \
+  --overwrite
+```
+
+Create a Raspberry Pi copy-ready runtime bundle:
+
+```bash
+python raspberry_pi/camera_ai/package_pi_camera_ai.py --require-model
+```
+
+The bundle is written to:
+
+```text
+data/packages/camera_ai_raspberry_pi_bundle.zip
+```
+
+Copy that ZIP to the Raspberry Pi repository root and unzip it. It contains the
+camera AI runtime files plus the best available model path, preferring
+`models/yolo_bear_ncnn_model`.
+
+## Train With Google Colab Free GPU
+
+If the local PC should only prepare data and Colab should handle training, use
+the notebook:
+
+```text
+notebooks/colab_bear_yolo_training.ipynb
+```
+
+VSCode flow:
+
+1. Open `notebooks/colab_bear_yolo_training.ipynb` in VSCode.
+2. Use the Google Colab extension to connect the notebook to a Colab runtime.
+3. In Colab, choose a GPU runtime such as T4.
+4. Run all cells.
+
+By default, the notebook downloads the public COCO 2017 `bear` training data
+inside Colab and builds the YOLO dataset there. No local dataset upload is
+required.
+
+If you prefer to use the ZIP prepared on this PC, change `DATASET_MODE` in the
+notebook to `upload_zip` or `google_drive_zip`, then provide:
+
+```text
+data/packages/bear_public_yolo_pi.zip
+```
+
+The notebook installs the pinned camera-AI training dependencies, checks
+`torch.cuda`, trains `yolov8n.pt` on the bear YOLO dataset, copies the trained
+model to:
+
+```text
+models/yolo_bear.pt
+```
+
+and tries to export the Raspberry Pi preferred runtime model:
+
+```text
+models/yolo_bear_ncnn_model
+```
+
+If NCNN export fails in the free Colab environment, it creates this fallback:
+
+```text
+models/yolo_bear.onnx
+```
+
+At the end, download:
+
+```text
+a1_camera_ai_colab_artifacts.zip
+```
+
+Place that ZIP at the repository root on this PC. Then import it and build the
+final Raspberry Pi runtime package:
+
+```powershell
+.\.venv\Scripts\python.exe raspberry_pi\camera_ai\import_colab_artifacts.py `
+  --artifact .\a1_camera_ai_colab_artifacts.zip `
+  --clean-existing-models
+```
+
+The Pi-copy-ready runtime bundle will be:
+
+```text
+data/packages/camera_ai_raspberry_pi_bundle.zip
+```
+
+For GitHub-based Raspberry Pi transfer, commit the imported runtime model files
+under `models/` or the final bundle above. The `.gitignore` keeps raw training
+datasets, COCO caches, debug frames, logs, and intermediate ZIPs out of Git.
+
 ## Output
 
 The module emits JSON Lines:

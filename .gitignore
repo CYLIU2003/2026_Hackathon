@@ -1,10 +1,37 @@
-*.pt
-*.onnx
-*.tflite
-models/
 *.mp4
 *.avi
-data/logs/*.csv
-data/debug_frames/
+
+# Local Python/cache files
 __pycache__/
 .venv/
+.pytest_cache/
+
+# Runtime logs and debug captures
+data/logs/*.csv
+data/debug_frames/
+
+# Training datasets and large source caches stay local.
+data/datasets/
+
+# Colab download/extracted training byproducts. Keep the imported runtime model
+# under models/ instead.
+a1_camera_ai_colab_artifacts*.zip
+best.pt
+args.yaml
+results.csv
+
+# Generated packages are ignored by default. Commit only the final Pi bundle if
+# it is intentionally built with the model included.
+data/packages/*
+!data/packages/camera_ai_raspberry_pi_bundle.zip
+
+# Model artifacts are ignored by default, then allowlist the Pi runtime model
+# names used by config.camera_ai.yaml.
+models/*
+!models/yolo_bear.pt
+!models/yolo_bear.onnx
+!models/yolo_bear_int8.tflite
+!models/yolo_bear_ncnn_model/
+!models/yolo_bear_ncnn_model/**
+
+notebooks/.ipynb_checkpoints/

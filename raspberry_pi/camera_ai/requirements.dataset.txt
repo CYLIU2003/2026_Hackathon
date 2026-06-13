@@ -1,0 +1,3 @@
+# Install this only on the PC used to prepare public training data.
+# The Raspberry Pi runtime only needs raspberry_pi/camera_ai/requirements.txt.
+fiftyone>=0.25,<2
