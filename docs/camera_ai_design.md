@@ -10,6 +10,10 @@ Raspberry Pi 4B camera_ai
   |
   +-- camera_test.py: verify capture and save one debug frame
   |
+  +-- run_camera_ai.py: headless detection loop for logs/dashboard
+  |
+  +-- web_camera_ai.py: SSH-forwardable live browser viewer
+  |
   +-- export_lightweight_yolo.py: export .pt to NCNN/TFLite/ONNX for Pi
   |
   +-- bear_detector.py: lightweight YOLO runtime wrapper, returns detections
@@ -70,3 +74,39 @@ fallback models:
 inference interval: about 2.0 sec
 remote dashboard JPEG update interval: about 1.0 sec
 ```
+
+## Runtime And Demo Paths
+
+```text
+Headless detection:
+  python -m raspberry_pi.camera_ai.run_camera_ai
+
+Dashboard integration:
+  run_camera_ai.py writes CSV logs and latest debug frame
+  raspberry_pi/dashboard/app.py serves the dashboard
+
+SSH live viewer:
+  web_camera_ai.py serves MJPEG + status JSON on 127.0.0.1:8081
+  PC opens it through ssh -L 8081:127.0.0.1:8081 <pi-ssh-host>
+```
+
+## Training And Model Transfer
+
+```text
+prepare_bear_training_data.py
+  -> public COCO/Open Images data to YOLO dataset
+
+notebooks/colab_bear_yolo_training.ipynb
+  -> optional Colab GPU training
+
+import_colab_artifacts.py
+  -> imports a1_camera_ai_colab_artifacts.zip
+  -> writes models/yolo_bear.pt
+  -> writes models/yolo_bear_ncnn_model
+
+package_pi_camera_ai.py
+  -> writes data/packages/camera_ai_raspberry_pi_bundle.zip
+```
+
+Selected runtime model files can be committed intentionally for Raspberry Pi
+transfer. Raw datasets, logs, debug frames, and Colab byproducts remain ignored.

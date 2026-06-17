@@ -12,6 +12,19 @@ The first control version can still run with **simulated sensor inputs**. The co
 
 ---
 
+## Quick Navigation
+
+| Need | Start here |
+|---|---|
+| Understand the current feature set | `docs/feature_overview.md` |
+| Find where files belong | `docs/repository_map.md` |
+| Run Raspberry Pi camera AI | `raspberry_pi/camera_ai/README.md` |
+| Run Raspberry Pi dashboard/logger | `raspberry_pi/README.md` |
+| Check safety/interface contracts | `docs/interface_spec.md`, `docs/camera_ai_interface_spec.md` |
+| Work on Arduino contact-pad logic | `arduino_uno_q/contact_pad_controller/` |
+
+---
+
 ## Project Vision
 
 The whole A1 system is divided into four layers.
@@ -324,7 +337,9 @@ a1-front-paw-contact-pad/
 │  ├─ state_machine.md
 │  ├─ interface_spec.md
 │  ├─ camera_ai_design.md
-│  └─ camera_ai_interface_spec.md
+│  ├─ camera_ai_interface_spec.md
+│  ├─ feature_overview.md
+│  └─ repository_map.md
 ├─ arduino_uno_q/
 │  ├─ contact_pad_controller/
 │  │  ├─ contact_pad_controller.ino
@@ -333,10 +348,16 @@ a1-front-paw-contact-pad/
 ├─ raspberry_pi/
 │  ├─ camera_ai/
 │  │  ├─ run_camera_ai.py
+│  │  ├─ web_camera_ai.py
 │  │  ├─ camera_test.py
 │  │  ├─ camera_capture.py
 │  │  ├─ bear_detector.py
 │  │  ├─ approach_logic.py
+│  │  ├─ prepare_bear_training_data.py
+│  │  ├─ train_bear_yolo.py
+│  │  ├─ export_lightweight_yolo.py
+│  │  ├─ import_colab_artifacts.py
+│  │  ├─ package_pi_camera_ai.py
 │  │  └─ config.camera_ai.yaml
 │  ├─ logger/
 │  │  ├─ serial_logger.py
@@ -350,6 +371,8 @@ a1-front-paw-contact-pad/
 ├─ models/
 │  ├─ yolo_bear_ncnn_model/
 │  └─ yolo_bear.pt
+├─ notebooks/
+│  └─ colab_bear_yolo_training.ipynb
 ├─ outputs/
 │  └─ camera_test.jpg
 ├─ examples/
@@ -358,9 +381,10 @@ a1-front-paw-contact-pad/
    └─ run_demo.sh
 ```
 
-`models/` and `outputs/` are runtime/demo folders. Model weights and generated
-camera images should not be committed unless the team intentionally adds a small
-sample artifact.
+`models/` and `outputs/` are runtime/demo folders. Runtime model files under
+`models/yolo_bear_ncnn_model` and `models/yolo_bear.pt` may be committed
+intentionally for Raspberry Pi transfer. Generated camera images, logs, raw
+training datasets, and Colab byproducts should stay out of Git.
 
 ---
 
@@ -445,7 +469,7 @@ fuser -v /dev/video0
 | `docs/` | Design documents, block diagram, state machine, interface specs, and camera AI notes. |
 | `data/logs/` | Runtime CSV/JSONL logs. Generated logs are normally kept out of Git except small samples. |
 | `examples/` | Small sample input/output files for demos and documentation. |
-| `models/` | Local YOLO model weights and exports. Preferred path is `models/yolo_bear_ncnn_model`; `.pt` is fallback only. Not committed by default. |
+| `models/` | Local YOLO model weights and exports. Preferred path is `models/yolo_bear_ncnn_model`; `.pt` is fallback only. Commit intentionally only when transferring runtime models. |
 | `outputs/` | Generated camera test images and temporary demo outputs. Not committed by default. |
 | `scripts/` | Helper scripts for running demos. |
 | `tests/` | Python tests for decision logic and camera AI helper behavior. |

@@ -279,7 +279,10 @@ Place a lightweight exported YOLO model at the primary path configured in
 models/yolo_bear_ncnn_model
 ```
 
-Model weights and exported runtime files are intentionally ignored by Git.
+Raw training data and intermediate Colab artifacts are intentionally ignored by
+Git. The selected runtime files under `models/yolo_bear_ncnn_model` and
+`models/yolo_bear.pt` may be committed intentionally when using GitHub to
+transfer the trained model to the Raspberry Pi.
 The current runtime also accepts the transferred trained PyTorch weights at:
 
 ```text
