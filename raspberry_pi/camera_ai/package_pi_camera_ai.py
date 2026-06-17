@@ -24,6 +24,7 @@ CAMERA_AI_FILES = (
     Path("raspberry_pi/camera_ai/README.md"),
     Path("raspberry_pi/camera_ai/requirements.txt"),
     Path("raspberry_pi/camera_ai/run_camera_ai.py"),
+    Path("raspberry_pi/camera_ai/web_camera_ai.py"),
 )
 
 

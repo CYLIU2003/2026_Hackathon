@@ -463,6 +463,53 @@ python -m raspberry_pi.camera_ai.run_camera_ai \
   --terminal-status
 ```
 
+## View Camera AI From Your PC Over SSH
+
+Recommended approach: run the camera AI web viewer on the Raspberry Pi, then
+open it from this PC through SSH local port forwarding. This does not require a
+monitor, desktop session, VNC, or X11 forwarding on the Raspberry Pi.
+
+On the Raspberry Pi:
+
+```bash
+cd ~/Desktop/2026_Hackathon
+git pull
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r raspberry_pi/camera_ai/requirements.txt
+python raspberry_pi/camera_ai/web_camera_ai.py \
+  --device /dev/video0 \
+  --host 127.0.0.1 \
+  --port 8081 \
+  --terminal-status
+```
+
+On this PC, in a separate terminal:
+
+```powershell
+ssh -L 8081:127.0.0.1:8081 <pi-ssh-host>
+```
+
+Then open this URL on the PC:
+
+```text
+http://127.0.0.1:8081
+```
+
+The page shows an MJPEG camera stream with detection boxes plus the latest AI
+status. JSON status is also available at:
+
+```text
+http://127.0.0.1:8081/status.json
+```
+
+Keep the viewer bound to `127.0.0.1` on the Raspberry Pi when using SSH
+forwarding. Use `--host 0.0.0.0` only on a trusted private network.
+
+X11 forwarding with `ssh -X` can show OpenCV windows, but it is usually slower
+and more fragile on Windows. The web viewer is the preferred demo path.
+
 ## Prepare Public Bear Training Data
 
 The training-data path is optional for the MVP runtime, but it lets the team
