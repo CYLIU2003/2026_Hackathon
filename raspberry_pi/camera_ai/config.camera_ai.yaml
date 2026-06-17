@@ -33,8 +33,9 @@ output:
   jsonl_stdout: true
   save_csv: true
   csv_path: "data/logs/camera_ai_log.csv"
-  save_debug_frames: false
+  save_debug_frames: true
   debug_frame_dir: "data/debug_frames"
+  latest_debug_frame: "latest_camera_ai.jpg"
 
 fail_safe:
   default_ai_bear_approaching: false

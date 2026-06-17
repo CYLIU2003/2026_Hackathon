@@ -367,6 +367,8 @@ a1-front-paw-contact-pad/
 Camera AI 모듈은 Raspberry Pi 4B 4GB 와 BUFFALO BSW500M USB 웹 카메라에서 동작한다.
 
 카메라 AI는 추가 인식 레이어이며, 단독 안전 제어기가 아니다.
+원격 브라우저 화면은 모니터링과 데모 지원용이며, RELEASE_ON/OFF 안전 판단을
+Arduino/contact-pad 쪽에서 Raspberry Pi 로 옮기는 것이 아니다.
 
 하드웨어 및 실행 전제:
 
@@ -375,13 +377,30 @@ Camera AI 모듈은 Raspberry Pi 4B 4GB 와 BUFFALO BSW500M USB 웹 카메라에
 - 카메라: BUFFALO BSW500M USB 웹 카메라
 - 캡처 장치: /dev/video0
 - metadata device: /dev/video1, 캡처에 사용하지 않음
-- 모델 경로: models/yolo_bear.pt
-- 권장 해상도: 640x480 또는 320x240
+- 우선 모델 경로: models/yolo_bear_ncnn_model
+- fallback 모델 경로: models/yolo_bear.pt
+- Raspberry Pi 4B 권장 해상도: 320x240
 - 권장 FourCC: 먼저 MJPG, 실패 시 YUYV fallback
 - 실패 동작: ai_bear_approaching=false
 ```
 
-`models/yolo_bear.pt` 가 없으면 시스템은 `AI_MODEL_LOAD_ERROR` 를 출력하고, `ai_model_ok=false` 로 설정하며 fail-safe 상태를 유지한다.
+설정된 모든 모델 경로가 없으면 시스템은 `AI_MODEL_LOAD_ERROR` 를 출력하고, `ai_model_ok=false` 로 설정하며 fail-safe 상태를 유지한다.
+
+원격 모니터링 동작:
+
+```text
+Camera AI process
+  -> CSV 저장: data/logs/camera_ai_log.csv
+  -> 최신 주석 이미지 저장: data/debug_frames/latest_camera_ai.jpg
+Dashboard process
+  -> 브라우저 화면: http://<pi-ip>:8080
+  -> 최신 이미지: /camera/latest.jpg
+```
+
+Raspberry Pi bring-up 확인 중 `.pt` PyTorch fallback 은 `YOLO.predict()` 실행 시
+`Illegal instruction` 으로 중단되었다. `ncnn` 을 설치하고
+`models/yolo_bear_ncnn_model` 을 사용하는 경로에서는 시작과 추론이 통과했으므로,
+Pi 데모에서는 NCNN 모델을 일반 실행 경로로 사용한다.
 
 Camera AI 실행 명령:
 
@@ -414,7 +433,7 @@ fuser -v /dev/video0
 | `docs/` | 블록 다이어그램, 상태 머신, 인터페이스 사양, camera AI 설계 메모 등 설계 문서. |
 | `data/logs/` | 실행 시 생성되는 CSV/JSONL 로그 폴더. 작은 샘플을 제외한 생성 로그는 보통 Git에 커밋하지 않는다. |
 | `examples/` | 데모와 설명에 쓰는 작은 샘플 입출력 파일. |
-| `models/` | 로컬 YOLO 모델 가중치 폴더. 기대 경로는 `models/yolo_bear.pt` 이다. 기본적으로 Git에 커밋하지 않는다. |
+| `models/` | 로컬 YOLO 모델 가중치와 export 폴더. 우선 경로는 `models/yolo_bear_ncnn_model` 이며, `.pt` 는 fallback 이다. 기본적으로 Git에 커밋하지 않는다. |
 | `outputs/` | 카메라 테스트 이미지와 임시 데모 출력. 기본적으로 Git에 커밋하지 않는다. |
 | `scripts/` | 데모 실행 보조 스크립트. |
 | `tests/` | 판단 로직과 camera AI 보조 처리에 대한 Python 테스트. |
@@ -445,7 +464,7 @@ fuser -v /dev/video0
 ### Phase 3: YOLO 모델 배치와 AI 추론
 
 ```text
-[ ] models/yolo_bear.pt 배치
+[ ] models/yolo_bear_ncnn_model 배치 또는 export
 [ ] AI_MODEL_LOAD_ERROR 가 사라지는지 확인
 [ ] 카메라 프레임에 YOLO 추론 실행
 [ ] ai_bear_approaching 을 fail-safe 로 출력
@@ -559,27 +578,104 @@ Camera AI is an additional perception layer, not the only safety controller.
 
 ### Raspberry Pi Camera AI
 
-1. 경량 YOLO 모델을 `models/yolo_bear.pt` 에 배치한다.
-2. 카메라를 확인한다.
-   ```bash
-   python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
-   ```
-3. AI를 한 번 실행한다.
-   ```bash
-   python3 -m raspberry_pi.camera_ai.run_camera_ai --terminal-status --no-jsonl --once
-   ```
+Raspberry Pi 에서 저장소 루트에서 실행한다.
+
+```bash
+cd ~/Desktop/2026_Hackathon
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r raspberry_pi/camera_ai/requirements.txt
+python -m pip install -r raspberry_pi/dashboard/requirements.txt
+```
+
+일반 데모 시작. 이 명령은 Camera AI 와 원격 대시보드를 함께 시작한다.
+
+```bash
+./scripts/run_demo.sh
+```
+
+같은 네트워크의 PC, 태블릿, 휴대폰 또는 Tailscale 을 통해 연다.
+
+```text
+http://<pi-ip>:8080
+```
+
+대시보드에는 Camera AI 최신 인식 이미지, AI 상태, contact-pad 상태가 표시된다.
+Camera AI 가 쓰는 이미지 경로는 다음과 같다.
+
+```text
+data/debug_frames/latest_camera_ai.jpg
+```
+
+대시보드 없이 Camera AI 만 시작하는 경우:
+
+```bash
+python -m raspberry_pi.camera_ai.run_camera_ai \
+  --device /dev/video0 \
+  --terminal-status \
+  --no-jsonl \
+  --save-debug-frames
+```
+
+한 번만 실행하는 smoke test:
+
+```bash
+python -m raspberry_pi.camera_ai.run_camera_ai \
+  --device /dev/video0 \
+  --terminal-status \
+  --no-jsonl \
+  --once \
+  --save-debug-frames
+```
+
+카메라 단독 확인:
+
+```bash
+python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
+```
 
 ### Raspberry Pi 대시보드
 
-1. 의존성을 설치한다.
-   ```bash
-   pip install -r raspberry_pi/dashboard/requirements.txt
-   ```
-2. 대시보드를 실행한다.
-   ```bash
-   python raspberry_pi/dashboard/app.py --log-dir data/logs --host 0.0.0.0 --port 8080
-   ```
-3. `http://<pi-ip>:8080` 을 열어 최신 상태를 확인한다.
+Camera AI 가 이미 실행 중이고 `data/debug_frames/latest_camera_ai.jpg` 를 쓰고 있을 때만
+대시보드만 따로 시작한다.
+
+```bash
+python raspberry_pi/dashboard/app.py \
+  --log-dir data/logs \
+  --camera-log-file data/logs/camera_ai_log.csv \
+  --debug-frame-dir data/debug_frames \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+열 주소:
+
+```text
+http://<pi-ip>:8080
+```
+
+전체 데모에서 Arduino Uno Q 시리얼 logger 도 함께 시작하는 경우:
+
+```bash
+RUN_SERIAL_LOGGER=1 ./scripts/run_demo.sh
+```
+
+8080 포트가 이미 사용 중인 경우:
+
+```bash
+DASHBOARD_PORT=18080 ./scripts/run_demo.sh
+```
+
+이번 bring-up 에서 확인한 내용:
+
+```text
+- Camera AI 가 models/yolo_bear_ncnn_model 을 NCNN 으로 읽는다.
+- data/debug_frames/latest_camera_ai.jpg 가 생성된다.
+- Dashboard / 가 HTTP 200 을 반환한다.
+- Dashboard /camera/latest.jpg 가 HTTP 200 image/jpeg 를 반환한다.
+- 데모 중지 후 Camera AI 또는 dashboard 프로세스가 남지 않는다.
+```
 
 ---
 

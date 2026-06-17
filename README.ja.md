@@ -368,6 +368,8 @@ a1-front-paw-contact-pad/
 Camera AI モジュールは、Raspberry Pi 4B 4GB と BUFFALO BSW500M USB Webカメラで動作する。
 
 カメラAIは追加の認識レイヤーであり、単独の安全制御器ではない。
+遠隔ブラウザ画面は監視・デモ支援用であり、RELEASE_ON/OFF の安全判定を
+Arduino/contact-pad 側から移動するものではない。
 
 ハードウェアと実行時の前提:
 
@@ -384,6 +386,22 @@ Camera AI モジュールは、Raspberry Pi 4B 4GB と BUFFALO BSW500M USB Web�
 ```
 
 設定されたモデルがすべて無い場合、`AI_MODEL_LOAD_ERROR` を出力し、`ai_model_ok=false` としてフェイルセーフを維持する。
+
+遠隔監視の動作:
+
+```text
+Camera AI process
+  -> CSV保存: data/logs/camera_ai_log.csv
+  -> 最新の認識済み画像保存: data/debug_frames/latest_camera_ai.jpg
+Dashboard process
+  -> ブラウザ画面: http://<pi-ip>:8080
+  -> 最新画像: /camera/latest.jpg
+```
+
+Raspberry Pi の立ち上げ確認では、`.pt` の PyTorch フォールバックが
+`YOLO.predict()` 実行時に `Illegal instruction` で落ちた。`ncnn` を入れて
+`models/yolo_bear_ncnn_model` を使う経路では起動・推論が通ったため、Pi の
+デモでは NCNN モデルを通常の実行経路として使う。
 
 Raspberry Pi 4B向けにnano `.pt` モデルを軽量形式へ書き出す:
 
@@ -571,27 +589,104 @@ Camera AI is an additional perception layer, not the only safety controller.
 
 ### Raspberry Pi Camera AI
 
-1. 軽量YOLOモデルを `models/yolo_bear_ncnn_model` に配置または書き出す。
-2. カメラを確認する。
-   ```bash
-   python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
-   ```
-3. AIを1回だけ実行する。
-   ```bash
-   python3 -m raspberry_pi.camera_ai.run_camera_ai --terminal-status --no-jsonl --once
-   ```
+Raspberry Pi 上で、リポジトリ直下から実行する。
+
+```bash
+cd ~/Desktop/2026_Hackathon
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r raspberry_pi/camera_ai/requirements.txt
+python -m pip install -r raspberry_pi/dashboard/requirements.txt
+```
+
+通常のデモ起動。Camera AI と遠隔ダッシュボードをまとめて起動する。
+
+```bash
+./scripts/run_demo.sh
+```
+
+同じネットワーク上のPC、タブレット、スマートフォン、または Tailscale 経由で開く。
+
+```text
+http://<pi-ip>:8080
+```
+
+ダッシュボードには、Camera AI の最新認識画像、AI状態、contact-pad状態が表示される。
+Camera AI が保存する画像は以下。
+
+```text
+data/debug_frames/latest_camera_ai.jpg
+```
+
+ダッシュボード無しで Camera AI だけ起動する場合:
+
+```bash
+python -m raspberry_pi.camera_ai.run_camera_ai \
+  --device /dev/video0 \
+  --terminal-status \
+  --no-jsonl \
+  --save-debug-frames
+```
+
+1回だけ動かすスモークテスト:
+
+```bash
+python -m raspberry_pi.camera_ai.run_camera_ai \
+  --device /dev/video0 \
+  --terminal-status \
+  --no-jsonl \
+  --once \
+  --save-debug-frames
+```
+
+カメラ単体確認:
+
+```bash
+python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
+```
 
 ### Raspberry Pi ダッシュボード
 
-1. 依存関係をインストールする。
-   ```bash
-   pip install -r raspberry_pi/dashboard/requirements.txt
-   ```
-2. ダッシュボードを起動する。
-   ```bash
-   python raspberry_pi/dashboard/app.py --log-dir data/logs --host 0.0.0.0 --port 8080
-   ```
-3. `http://<pi-ip>:8080` を開き、最新状態を確認する。
+Camera AI が既に動いていて `data/debug_frames/latest_camera_ai.jpg` を書いている場合だけ、
+ダッシュボード単体を起動する。
+
+```bash
+python raspberry_pi/dashboard/app.py \
+  --log-dir data/logs \
+  --camera-log-file data/logs/camera_ai_log.csv \
+  --debug-frame-dir data/debug_frames \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+開くURL:
+
+```text
+http://<pi-ip>:8080
+```
+
+フルデモ時に Arduino Uno Q のシリアルロガーも同時に起動する場合:
+
+```bash
+RUN_SERIAL_LOGGER=1 ./scripts/run_demo.sh
+```
+
+8080番ポートが既に使われている場合:
+
+```bash
+DASHBOARD_PORT=18080 ./scripts/run_demo.sh
+```
+
+今回の立ち上げ確認で通した内容:
+
+```text
+- Camera AI が models/yolo_bear_ncnn_model を NCNN 経由で読み込む。
+- data/debug_frames/latest_camera_ai.jpg が生成される。
+- Dashboard / が HTTP 200 を返す。
+- Dashboard /camera/latest.jpg が HTTP 200 image/jpeg を返す。
+- デモ停止後、Camera AI と dashboard のプロセスが残らない。
+```
 
 ---
 

@@ -41,7 +41,7 @@ class YoloBearDetector:
             ) from exc
 
         try:
-            self.model = YOLO(self.model_path)
+            self.model = YOLO(self.model_path, task="detect")
         except Exception as exc:
             raise RuntimeError(f"failed to load YOLO model: {self.model_path}") from exc
         self._ensure_backend_ready()

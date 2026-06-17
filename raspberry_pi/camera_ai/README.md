@@ -20,6 +20,125 @@ Run commands from the repository root:
 cd ~/Desktop/2026_Hackathon
 ```
 
+Create the virtual environment and install the camera AI + dashboard
+dependencies:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r raspberry_pi/camera_ai/requirements.txt
+python -m pip install -r raspberry_pi/dashboard/requirements.txt
+```
+
+## Quick Start: Camera AI + Remote Dashboard
+
+Use this for the normal demo. It starts the Camera AI process, saves the latest
+annotated recognition image, and starts the browser dashboard.
+
+```bash
+cd ~/Desktop/2026_Hackathon
+source .venv/bin/activate
+./scripts/run_demo.sh
+```
+
+Then open this from another PC, tablet, or phone on the same network, or through
+Tailscale:
+
+```text
+http://<pi-ip>:8080
+```
+
+What you should see:
+
+```text
+- Camera AI View: latest camera frame with detection boxes and status text
+- Camera AI State: event, camera/model status, confidence, approach state
+- Contact Pad State: latest contact-pad / release CSV state when available
+```
+
+The Camera AI image shown by the dashboard is written here:
+
+```text
+data/debug_frames/latest_camera_ai.jpg
+```
+
+That image includes the latest camera frame, detection boxes, event,
+confidence, approach state, and inference time. It is for remote monitoring
+only and does not change the Arduino/contact-pad RELEASE_ON/OFF safety logic.
+
+To stop the demo, press `Ctrl+C` in the terminal running `./scripts/run_demo.sh`.
+
+If you also want to start the Arduino Uno Q serial logger:
+
+```bash
+RUN_SERIAL_LOGGER=1 ./scripts/run_demo.sh
+```
+
+If port 8080 is already in use:
+
+```bash
+DASHBOARD_PORT=18080 ./scripts/run_demo.sh
+```
+
+Then open:
+
+```text
+http://<pi-ip>:18080
+```
+
+## Start Camera AI Only
+
+Use this when you only want to confirm camera recognition and CSV/image output,
+without the dashboard:
+
+```bash
+source .venv/bin/activate
+python -m raspberry_pi.camera_ai.run_camera_ai \
+  --device /dev/video0 \
+  --terminal-status \
+  --no-jsonl \
+  --save-debug-frames
+```
+
+One-shot smoke test:
+
+```bash
+python -m raspberry_pi.camera_ai.run_camera_ai \
+  --device /dev/video0 \
+  --terminal-status \
+  --no-jsonl \
+  --once \
+  --save-debug-frames
+```
+
+Expected output includes a line like:
+
+```text
+event=AI_NO_BEAR camera=ok model=ok bear=no approaching=no device=/dev/video0
+```
+
+## Start Dashboard Only
+
+Use this when Camera AI is already running and writing
+`data/debug_frames/latest_camera_ai.jpg`:
+
+```bash
+source .venv/bin/activate
+python raspberry_pi/dashboard/app.py \
+  --log-dir data/logs \
+  --camera-log-file data/logs/camera_ai_log.csv \
+  --debug-frame-dir data/debug_frames \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+Open:
+
+```text
+http://<pi-ip>:8080
+```
+
 ## Assisted Raspberry Pi Bring-up
 
 Use this order when setting up the module on the Raspberry Pi:
@@ -27,7 +146,7 @@ Use this order when setting up the module on the Raspberry Pi:
 1. Confirm the USB camera is visible to Linux.
 2. Create and activate the project virtual environment.
 3. Run `camera_test.py` and confirm it saves a debug frame.
-4. Place the YOLO model file under `models/`.
+4. Export or place the lightweight model at `models/yolo_bear_ncnn_model`.
 5. Run `run_camera_ai.py --once --terminal-status`.
 6. Run `run_camera_ai.py --max-iterations 5 --terminal-status` and check JSON Lines plus CSV output.
 
@@ -85,6 +204,48 @@ To watch the CSV log from a terminal:
 tail -f data/logs/camera_ai_log.csv
 ```
 
+## Remote Browser View Details
+
+Camera AI saves an annotated latest frame by default:
+
+```text
+data/debug_frames/latest_camera_ai.jpg
+```
+
+The frame contains the latest camera image, detection boxes, event, confidence,
+approach state, and inference time. It is for remote monitoring only and does
+not change release safety logic.
+
+Start Camera AI and the browser dashboard together:
+
+```bash
+source .venv/bin/activate
+./scripts/run_demo.sh
+```
+
+Then open this from another machine on the same network, or through Tailscale:
+
+```text
+http://<pi-ip>:8080
+```
+
+If the image area says `No camera frame yet`, check:
+
+```bash
+tail -f data/logs/camera_ai.status.log
+ls -l data/debug_frames/latest_camera_ai.jpg
+```
+
+You can force frame output from the Camera AI process:
+
+```bash
+python -m raspberry_pi.camera_ai.run_camera_ai \
+  --device /dev/video0 \
+  --terminal-status \
+  --no-jsonl \
+  --save-debug-frames
+```
+
 Install camera tools on Raspberry Pi:
 
 ```bash
@@ -126,9 +287,10 @@ models/yolo_bear.pt
 ```
 
 At startup, `run_camera_ai.py` tries the existing configured model paths in
-order. If the preferred NCNN export exists but the `ncnn` Python runtime is not
-installed, the script safely falls back to `models/yolo_bear.pt` instead of
-crashing before detection.
+order. On Raspberry Pi 4B, use the preferred NCNN export plus the `ncnn`
+Python runtime from `requirements.txt`. The raw PyTorch `.pt` fallback is kept
+for development and transfer convenience, but it can be slower and may not be
+stable on every Pi/PyTorch wheel combination.
 
 The Raspberry Pi 4B 4GB profile uses:
 

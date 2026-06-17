@@ -367,6 +367,8 @@ a1-front-paw-contact-pad/
 Camera AI 模块运行在 Raspberry Pi 4B 4GB 上，使用 BUFFALO BSW500M USB Web摄像头。
 
 相机AI是额外的感知层，不是唯一的安全控制器。
+远程浏览器画面只用于监控和演示支持，不会把 RELEASE_ON/OFF 的安全判断从
+Arduino/contact-pad 侧移到 Raspberry Pi。
 
 硬件和运行时前提：
 
@@ -375,13 +377,30 @@ Camera AI 模块运行在 Raspberry Pi 4B 4GB 上，使用 BUFFALO BSW500M USB W
 - 摄像头: BUFFALO BSW500M USB Web摄像头
 - 图像采集设备: /dev/video0
 - metadata device: /dev/video1，不能用于采集
-- 模型路径: models/yolo_bear.pt
-- 推荐分辨率: 640x480 或 320x240
+- 优先模型路径: models/yolo_bear_ncnn_model
+- fallback模型路径: models/yolo_bear.pt
+- Raspberry Pi 4B 推荐分辨率: 320x240
 - 推荐FourCC: 先MJPG，失败时fallback到YUYV
 - 失败行为: ai_bear_approaching=false
 ```
 
-如果缺少 `models/yolo_bear.pt`，系统输出 `AI_MODEL_LOAD_ERROR`，设置 `ai_model_ok=false`，并保持故障安全状态。
+如果所有配置的模型路径都缺失，系统输出 `AI_MODEL_LOAD_ERROR`，设置 `ai_model_ok=false`，并保持故障安全状态。
+
+远程监控的工作方式：
+
+```text
+Camera AI process
+  -> 保存CSV: data/logs/camera_ai_log.csv
+  -> 保存最新标注图像: data/debug_frames/latest_camera_ai.jpg
+Dashboard process
+  -> 浏览器页面: http://<pi-ip>:8080
+  -> 最新图像: /camera/latest.jpg
+```
+
+在 Raspberry Pi bring-up 检查中，`.pt` 的 PyTorch fallback 在
+`YOLO.predict()` 时出现 `Illegal instruction`。安装 `ncnn` 并使用
+`models/yolo_bear_ncnn_model` 后，启动和推理都可以通过。因此 Pi 演示时应把
+NCNN模型作为正常运行路径。
 
 Camera AI 运行命令：
 
@@ -414,7 +433,7 @@ fuser -v /dev/video0
 | `docs/` | 设计资料，包括框图、状态机、接口规格和camera AI设计说明。 |
 | `data/logs/` | 运行时CSV/JSONL日志目录。除小型示例外，生成日志通常不提交到Git。 |
 | `examples/` | 演示和说明用的小型示例输入/输出文件。 |
-| `models/` | 本地YOLO模型权重目录。期望路径是 `models/yolo_bear.pt`。默认不提交到Git。 |
+| `models/` | 本地YOLO模型权重和导出目录。优先路径是 `models/yolo_bear_ncnn_model`，`.pt` 只作为fallback。默认不提交到Git。 |
 | `outputs/` | 相机测试图像和临时演示输出。默认不提交到Git。 |
 | `scripts/` | 演示运行辅助脚本。 |
 | `tests/` | 决策逻辑和camera AI辅助处理的Python测试。 |
@@ -445,7 +464,7 @@ fuser -v /dev/video0
 ### Phase 3: YOLO模型放置和AI推理
 
 ```text
-[ ] 放置 models/yolo_bear.pt
+[ ] 放置或导出 models/yolo_bear_ncnn_model
 [ ] 确认 AI_MODEL_LOAD_ERROR 消失
 [ ] 对相机图像运行YOLO推理
 [ ] 以故障安全方式输出 ai_bear_approaching
@@ -559,27 +578,104 @@ Camera AI is an additional perception layer, not the only safety controller.
 
 ### Raspberry Pi Camera AI
 
-1. 将轻量YOLO模型放到 `models/yolo_bear.pt`。
-2. 确认摄像头。
-   ```bash
-   python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
-   ```
-3. 运行一次AI流程。
-   ```bash
-   python3 -m raspberry_pi.camera_ai.run_camera_ai --terminal-status --no-jsonl --once
-   ```
+在 Raspberry Pi 上，从仓库根目录执行：
+
+```bash
+cd ~/Desktop/2026_Hackathon
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r raspberry_pi/camera_ai/requirements.txt
+python -m pip install -r raspberry_pi/dashboard/requirements.txt
+```
+
+正常演示启动。这个命令会同时启动 Camera AI 和远程仪表盘：
+
+```bash
+./scripts/run_demo.sh
+```
+
+从同一网络中的电脑、平板、手机，或通过 Tailscale 打开：
+
+```text
+http://<pi-ip>:8080
+```
+
+仪表盘会显示 Camera AI 最新识别画面、AI状态和 contact-pad 状态。
+Camera AI 写出的图像路径是：
+
+```text
+data/debug_frames/latest_camera_ai.jpg
+```
+
+只启动 Camera AI，不启动仪表盘：
+
+```bash
+python -m raspberry_pi.camera_ai.run_camera_ai \
+  --device /dev/video0 \
+  --terminal-status \
+  --no-jsonl \
+  --save-debug-frames
+```
+
+只运行一次的 smoke test：
+
+```bash
+python -m raspberry_pi.camera_ai.run_camera_ai \
+  --device /dev/video0 \
+  --terminal-status \
+  --no-jsonl \
+  --once \
+  --save-debug-frames
+```
+
+摄像头单体确认：
+
+```bash
+python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
+```
 
 ### Raspberry Pi 仪表盘
 
-1. 安装依赖。
-   ```bash
-   pip install -r raspberry_pi/dashboard/requirements.txt
-   ```
-2. 启动仪表盘。
-   ```bash
-   python raspberry_pi/dashboard/app.py --log-dir data/logs --host 0.0.0.0 --port 8080
-   ```
-3. 打开 `http://<pi-ip>:8080` 查看最新状态。
+只有在 Camera AI 已经运行并写出 `data/debug_frames/latest_camera_ai.jpg` 时，
+才单独启动仪表盘：
+
+```bash
+python raspberry_pi/dashboard/app.py \
+  --log-dir data/logs \
+  --camera-log-file data/logs/camera_ai_log.csv \
+  --debug-frame-dir data/debug_frames \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+打开：
+
+```text
+http://<pi-ip>:8080
+```
+
+完整演示时，如果还要同时启动 Arduino Uno Q 串口logger：
+
+```bash
+RUN_SERIAL_LOGGER=1 ./scripts/run_demo.sh
+```
+
+如果 8080 端口已经被占用：
+
+```bash
+DASHBOARD_PORT=18080 ./scripts/run_demo.sh
+```
+
+本次 bring-up 已确认：
+
+```text
+- Camera AI 通过 NCNN 读取 models/yolo_bear_ncnn_model。
+- data/debug_frames/latest_camera_ai.jpg 可以生成。
+- Dashboard / 返回 HTTP 200。
+- Dashboard /camera/latest.jpg 返回 HTTP 200 image/jpeg。
+- 停止demo后，不会留下 Camera AI 或 dashboard 进程。
+```
 
 ---
 

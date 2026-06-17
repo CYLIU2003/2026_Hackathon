@@ -86,6 +86,11 @@ transferred training result such as `models/yolo_bear.pt` to work even when the
 preferred `models/yolo_bear_ncnn_model` export is present but the NCNN Python
 runtime is not installed yet.
 
+For Raspberry Pi 4B operation, install `ncnn` from
+`raspberry_pi/camera_ai/requirements.txt` and use
+`models/yolo_bear_ncnn_model` as the normal runtime path. The PyTorch `.pt`
+fallback is intended mainly for development and transfer convenience.
+
 ## Future Integration
 
 Correct future integration style:

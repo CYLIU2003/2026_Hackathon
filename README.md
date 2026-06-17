@@ -369,6 +369,8 @@ sample artifact.
 The camera AI module runs on Raspberry Pi 4B 4GB with a BUFFALO BSW500M USB web camera.
 
 Camera AI is an additional perception layer, not the only safety controller.
+The remote browser view is for monitoring and demo support only; it does not
+move the RELEASE_ON/OFF safety decision away from the Arduino/contact-pad side.
 
 Hardware and runtime assumptions:
 
@@ -385,6 +387,22 @@ Hardware and runtime assumptions:
 ```
 
 If all configured model paths are missing, the system outputs `AI_MODEL_LOAD_ERROR`, sets `ai_model_ok=false`, and remains fail-safe.
+
+Remote monitoring behavior:
+
+```text
+Camera AI process
+  -> writes CSV: data/logs/camera_ai_log.csv
+  -> writes latest annotated frame: data/debug_frames/latest_camera_ai.jpg
+Dashboard process
+  -> serves browser page: http://<pi-ip>:8080
+  -> serves latest image: /camera/latest.jpg
+```
+
+During bring-up on the Raspberry Pi, the `.pt` PyTorch fallback hit an
+`Illegal instruction` during `YOLO.predict()`. Installing `ncnn` and using
+`models/yolo_bear_ncnn_model` fixed the startup path, so the Pi demo should use
+the NCNN model as the normal runtime.
 
 Lighten/export a nano `.pt` model for Raspberry Pi 4B:
 
@@ -574,27 +592,104 @@ This prototype uses **simulated sensor inputs** and does not require real sensor
 
 ### Raspberry Pi Camera AI
 
-1. Export or place a lightweight YOLO model at `models/yolo_bear_ncnn_model`.
-2. Confirm the camera:
-   ```bash
-   python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
-   ```
-3. Run one AI cycle:
-   ```bash
-   python3 -m raspberry_pi.camera_ai.run_camera_ai --terminal-status --no-jsonl --once
-   ```
+Run these commands from the repository root on the Raspberry Pi:
+
+```bash
+cd ~/Desktop/2026_Hackathon
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r raspberry_pi/camera_ai/requirements.txt
+python -m pip install -r raspberry_pi/dashboard/requirements.txt
+```
+
+Normal demo startup, including Camera AI and the remote dashboard:
+
+```bash
+./scripts/run_demo.sh
+```
+
+Open this from another PC, tablet, or phone on the same network, or through Tailscale:
+
+```text
+http://<pi-ip>:8080
+```
+
+The dashboard shows the latest Camera AI recognition image, AI state, and
+contact-pad state. The image is written by Camera AI at:
+
+```text
+data/debug_frames/latest_camera_ai.jpg
+```
+
+Camera AI only, without the dashboard:
+
+```bash
+python -m raspberry_pi.camera_ai.run_camera_ai \
+  --device /dev/video0 \
+  --terminal-status \
+  --no-jsonl \
+  --save-debug-frames
+```
+
+One-shot smoke test:
+
+```bash
+python -m raspberry_pi.camera_ai.run_camera_ai \
+  --device /dev/video0 \
+  --terminal-status \
+  --no-jsonl \
+  --once \
+  --save-debug-frames
+```
+
+Camera check:
+
+```bash
+python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
+```
 
 ### Raspberry Pi Dashboard
 
-1. Install dependencies:
-   ```bash
-   pip install -r raspberry_pi/dashboard/requirements.txt
-   ```
-2. Run the dashboard:
-   ```bash
-   python raspberry_pi/dashboard/app.py --log-dir data/logs --host 0.0.0.0 --port 8080
-   ```
-3. Open `http://<pi-ip>:8080` to view the latest state.
+Use this only when Camera AI is already running and writing
+`data/debug_frames/latest_camera_ai.jpg`:
+
+```bash
+python raspberry_pi/dashboard/app.py \
+  --log-dir data/logs \
+  --camera-log-file data/logs/camera_ai_log.csv \
+  --debug-frame-dir data/debug_frames \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+Open:
+
+```text
+http://<pi-ip>:8080
+```
+
+To also start the Arduino Uno Q serial logger during the full demo, run:
+
+```bash
+RUN_SERIAL_LOGGER=1 ./scripts/run_demo.sh
+```
+
+If port 8080 is already in use:
+
+```bash
+DASHBOARD_PORT=18080 ./scripts/run_demo.sh
+```
+
+Bring-up check already verified on the target Raspberry Pi path:
+
+```text
+- Camera AI loads models/yolo_bear_ncnn_model through NCNN.
+- data/debug_frames/latest_camera_ai.jpg is generated.
+- Dashboard / returns HTTP 200.
+- Dashboard /camera/latest.jpg returns HTTP 200 image/jpeg.
+- Stopping the demo leaves no Camera AI or dashboard process running.
+```
 
 ---
 

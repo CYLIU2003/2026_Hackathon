@@ -60,6 +60,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable JSON Lines stdout. Useful with --terminal-status for human-only CUI use.",
     )
+    parser.add_argument(
+        "--save-debug-frames",
+        action="store_true",
+        help="Save the latest annotated camera frame for the remote dashboard.",
+    )
+    parser.add_argument(
+        "--no-debug-frames",
+        action="store_true",
+        help="Disable annotated camera frame output even if enabled in config.",
+    )
     return parser
 
 
@@ -247,6 +257,83 @@ def print_terminal_status(record: dict) -> None:
     print(format_terminal_status(record), file=sys.stderr, flush=True)
 
 
+def debug_frame_enabled(output_config: dict, args: argparse.Namespace) -> bool:
+    if args.no_debug_frames:
+        return False
+    return args.save_debug_frames or bool(output_config.get("save_debug_frames", False))
+
+
+def draw_status_panel(cv2, frame, record: dict) -> None:
+    event = str(record.get("event") or "-")
+    bear_status = "bear=yes" if record.get("ai_bear_detected") else "bear=no"
+    approach_status = (
+        "approaching=yes" if record.get("ai_bear_approaching") else "approaching=no"
+    )
+    confidence = format_optional_float(record.get("ai_bear_confidence"))
+    inference_ms = format_optional_float(record.get("inference_time_ms"), digits=1)
+    line = (
+        f"{event} | {bear_status} | {approach_status} | "
+        f"conf={confidence} | infer={inference_ms}ms"
+    )
+    cv2.rectangle(frame, (0, 0), (frame.shape[1], 34), (0, 0, 0), thickness=-1)
+    cv2.putText(
+        frame,
+        line,
+        (8, 22),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (255, 255, 255),
+        1,
+        cv2.LINE_AA,
+    )
+
+
+def draw_detections(cv2, frame, detections: list[dict]) -> None:
+    for detection in detections:
+        bbox = detection.get("bbox_xyxy")
+        if not bbox or len(bbox) != 4:
+            continue
+        x1, y1, x2, y2 = [int(round(float(value))) for value in bbox]
+        class_name = str(detection.get("class_name", "object"))
+        confidence = format_optional_float(detection.get("confidence"))
+        area = format_optional_percent(detection.get("box_area_ratio"))
+        label = f"{class_name} {confidence} area={area}"
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 180, 255), thickness=2)
+        label_y = max(16, y1 - 8)
+        cv2.putText(
+            frame,
+            label,
+            (x1, label_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (0, 180, 255),
+            1,
+            cv2.LINE_AA,
+        )
+
+
+def save_debug_frame(
+    frame,
+    detections: list[dict],
+    record: dict,
+    *,
+    debug_frame_dir: Path,
+    latest_frame_name: str,
+) -> Path:
+    import cv2
+
+    debug_frame_dir.mkdir(parents=True, exist_ok=True)
+    latest_frame_path = debug_frame_dir / latest_frame_name
+    temporary_frame_path = latest_frame_path.with_suffix(".tmp.jpg")
+    annotated_frame = frame.copy()
+    draw_detections(cv2, annotated_frame, detections)
+    draw_status_panel(cv2, annotated_frame, record)
+    if not cv2.imwrite(str(temporary_frame_path), annotated_frame):
+        raise RuntimeError(f"failed to write debug frame: {temporary_frame_path}")
+    temporary_frame_path.replace(latest_frame_path)
+    return latest_frame_path
+
+
 def publish_state(
     publisher: AiStatePublisher,
     state: AiState,
@@ -268,6 +355,11 @@ def main() -> int:
         return 1
 
     output_config = config.get("output", {})
+    save_frames = debug_frame_enabled(output_config, args)
+    debug_frame_dir = repo_path(output_config.get("debug_frame_dir", "data/debug_frames"))
+    latest_frame_name = str(
+        output_config.get("latest_debug_frame", "latest_camera_ai.jpg")
+    )
     publisher = AiStatePublisher(
         jsonl_stdout=bool(output_config.get("jsonl_stdout", True)) and not args.no_jsonl,
         save_csv=bool(output_config.get("save_csv", True)),
@@ -364,7 +456,7 @@ def main() -> int:
             inference_time_ms = (time.perf_counter() - started_at) * 1000.0
             decision = approach_logic.update(detections)
 
-            publish_state(
+            record = publish_state(
                 publisher,
                 AiState(
                     camera_device=camera_device,
@@ -379,6 +471,14 @@ def main() -> int:
                 ),
                 terminal_status=args.terminal_status,
             )
+            if save_frames:
+                save_debug_frame(
+                    frame,
+                    detections,
+                    record,
+                    debug_frame_dir=debug_frame_dir,
+                    latest_frame_name=latest_frame_name,
+                )
 
             if use_display:
                 import cv2
