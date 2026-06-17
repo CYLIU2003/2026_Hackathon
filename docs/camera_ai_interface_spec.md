@@ -81,6 +81,11 @@ fallbacks:
 If no configured model path exists or the model cannot be loaded, emit
 `AI_MODEL_LOAD_ERROR` and keep `ai_bear_approaching=false`.
 
+The runtime tries all existing configured model paths in order. This allows a
+transferred training result such as `models/yolo_bear.pt` to work even when the
+preferred `models/yolo_bear_ncnn_model` export is present but the NCNN Python
+runtime is not installed yet.
+
 ## Future Integration
 
 Correct future integration style:

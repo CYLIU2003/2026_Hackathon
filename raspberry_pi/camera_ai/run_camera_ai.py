@@ -88,7 +88,9 @@ def resolve_model_path(
     if model_override:
         return repo_path(model_override)
 
-    primary_model_path = inference_config.get("model_path", "models/yolo_bear_ncnn_model")
+    primary_model_path = inference_config.get(
+        "model_path", "models/yolo_bear_ncnn_model"
+    )
     candidate_paths = [primary_model_path]
     candidate_paths.extend(inference_config.get("fallback_model_paths", []))
     resolved_candidates = [repo_path(candidate_path) for candidate_path in candidate_paths]
@@ -96,6 +98,57 @@ def resolve_model_path(
         if candidate_path.exists():
             return candidate_path
     return resolved_candidates[0]
+
+
+def resolve_model_candidates(
+    inference_config: dict,
+    model_override: str | None = None,
+) -> list[Path]:
+    if model_override:
+        return [repo_path(model_override)]
+
+    primary_model_path = inference_config.get(
+        "model_path", "models/yolo_bear_ncnn_model"
+    )
+    candidate_paths = [primary_model_path]
+    candidate_paths.extend(inference_config.get("fallback_model_paths", []))
+    resolved_candidates = [
+        repo_path(candidate_path) for candidate_path in candidate_paths
+    ]
+    existing_candidates = [
+        candidate_path for candidate_path in resolved_candidates if candidate_path.exists()
+    ]
+    if existing_candidates:
+        return existing_candidates
+    return [resolved_candidates[0]]
+
+
+def load_detector_from_candidates(
+    inference_config: dict,
+    model_override: str | None = None,
+) -> tuple[YoloBearDetector, Path]:
+    load_errors: list[str] = []
+    for model_path in resolve_model_candidates(inference_config, model_override):
+        try:
+            return (
+                YoloBearDetector(
+                    model_path,
+                    input_size=int(inference_config.get("input_size", 256)),
+                    confidence_floor=float(
+                        inference_config.get("confidence_floor", 0.05)
+                    ),
+                    device=inference_config.get("device", "cpu"),
+                    class_ids=inference_config.get("class_ids", []),
+                ),
+                model_path,
+            )
+        except Exception as exc:
+            load_errors.append(f"{model_path}: {exc}")
+
+    raise RuntimeError(
+        "failed to load any configured YOLO model. "
+        + " | ".join(load_errors)
+    )
 
 
 def config_path(path_value: str | Path) -> Path:
@@ -261,17 +314,16 @@ def main() -> int:
         return 1
 
     inference_config = config.get("inference", {})
-    model_path = resolve_model_path(inference_config, args.model)
     try:
-        detector = YoloBearDetector(
-            model_path,
-            input_size=int(inference_config.get("input_size", 256)),
-            confidence_floor=float(inference_config.get("confidence_floor", 0.05)),
-            device=inference_config.get("device", "cpu"),
-            class_ids=inference_config.get("class_ids", []),
+        detector, model_path = load_detector_from_candidates(
+            inference_config, args.model
         )
-    except Exception:
+        if args.terminal_status:
+            print(f"selected_model={model_path}", file=sys.stderr, flush=True)
+    except Exception as exc:
         capture.release()
+        if args.terminal_status:
+            print(f"model_load_error={exc}", file=sys.stderr, flush=True)
         publish_state(
             publisher,
             build_fail_safe_state(

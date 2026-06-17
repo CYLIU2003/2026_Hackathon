@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ class YoloBearDetector:
                 "Place an exported lightweight model at models/yolo_bear_ncnn_model "
                 "or a fallback prototype model at models/yolo_bear.pt."
             )
+        self._check_runtime_dependency()
 
         try:
             from ultralytics import YOLO
@@ -42,6 +44,7 @@ class YoloBearDetector:
             self.model = YOLO(self.model_path)
         except Exception as exc:
             raise RuntimeError(f"failed to load YOLO model: {self.model_path}") from exc
+        self._ensure_backend_ready()
         if enable_model_fusion:
             self._try_fuse_model()
 
@@ -102,3 +105,20 @@ class YoloBearDetector:
             fuse()
         except Exception:
             return
+
+    def _ensure_backend_ready(self) -> None:
+        try:
+            _ = self.model.names
+        except Exception as exc:
+            raise RuntimeError(
+                f"failed to initialize YOLO runtime backend: {self.model_path}"
+            ) from exc
+
+    def _check_runtime_dependency(self) -> None:
+        model_path = Path(self.model_path)
+        is_ncnn_export = model_path.is_dir() and any(model_path.glob("*.ncnn.param"))
+        if is_ncnn_export and importlib.util.find_spec("ncnn") is None:
+            raise RuntimeError(
+                "NCNN runtime is not installed. Install ncnn on the Raspberry Pi "
+                "or use fallback PyTorch weights such as models/yolo_bear.pt."
+            )

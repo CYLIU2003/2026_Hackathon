@@ -119,6 +119,16 @@ models/yolo_bear_ncnn_model
 ```
 
 Model weights and exported runtime files are intentionally ignored by Git.
+The current runtime also accepts the transferred trained PyTorch weights at:
+
+```text
+models/yolo_bear.pt
+```
+
+At startup, `run_camera_ai.py` tries the existing configured model paths in
+order. If the preferred NCNN export exists but the `ncnn` Python runtime is not
+installed, the script safely falls back to `models/yolo_bear.pt` instead of
+crashing before detection.
 
 The Raspberry Pi 4B 4GB profile uses:
 
@@ -265,21 +275,29 @@ Override camera and model:
 
 ```bash
 source .venv/bin/activate
-python -m raspberry_pi.camera_ai.run_camera_ai --device /dev/video0 --model models/bear_yolo.pt
+python -m raspberry_pi.camera_ai.run_camera_ai --device /dev/video0 --model models/yolo_bear.pt
 ```
 
 Run one inference cycle:
 
 ```bash
 source .venv/bin/activate
-python -m raspberry_pi.camera_ai.run_camera_ai --device /dev/video0 --once
+python -m raspberry_pi.camera_ai.run_camera_ai \
+  --device /dev/video0 \
+  --model models/yolo_bear.pt \
+  --once \
+  --terminal-status
 ```
 
 For a short smoke test without running forever:
 
 ```bash
 source .venv/bin/activate
-python -m raspberry_pi.camera_ai.run_camera_ai --device /dev/video0 --max-iterations 5
+python -m raspberry_pi.camera_ai.run_camera_ai \
+  --device /dev/video0 \
+  --model models/yolo_bear.pt \
+  --max-iterations 5 \
+  --terminal-status
 ```
 
 ## Prepare Public Bear Training Data
