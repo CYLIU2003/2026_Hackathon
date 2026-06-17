@@ -67,5 +67,6 @@ fallback models:
   - models/yolo_bear_int8.tflite
   - models/yolo_bear.onnx
   - models/yolo_bear.pt
-inference interval: 0.75 sec
+inference interval: about 2.0 sec
+remote dashboard JPEG update interval: about 1.0 sec
 ```

@@ -299,7 +299,8 @@ capture: 320x240 MJPG at 10 fps
 YOLO input_size: 256
 primary model: models/yolo_bear_ncnn_model
 fallbacks: models/yolo_bear_int8.tflite, models/yolo_bear.onnx, models/yolo_bear.pt
-inference interval: 0.75 sec
+inference interval: about 2.0 sec
+remote dashboard JPEG update interval: about 1.0 sec
 ```
 
 For prototype bring-up, this file may be a COCO-pretrained nano model. The

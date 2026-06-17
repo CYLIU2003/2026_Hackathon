@@ -257,7 +257,7 @@ def create_app(
             camera_log_path=str(chosen_camera_log) if chosen_camera_log else "",
             camera_frame_path=str(camera_frame_path),
             camera_frame_available=camera_frame_path.exists(),
-            cache_buster=int(time.time()),
+            cache_buster=time.time_ns(),
             refresh_interval=refresh_interval,
         )
 
@@ -266,8 +266,17 @@ def create_app(
         camera_frame_path = debug_frame_dir / camera_frame_file
         if not camera_frame_path.exists():
             abort(404)
-        response = send_file(camera_frame_path, mimetype="image/jpeg")
-        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response = send_file(
+            camera_frame_path,
+            mimetype="image/jpeg",
+            conditional=False,
+            max_age=0,
+        )
+        response.headers["Cache-Control"] = (
+            "no-store, no-cache, must-revalidate, max-age=0"
+        )
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
         return response
 
     return app

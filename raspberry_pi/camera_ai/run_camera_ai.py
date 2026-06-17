@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -346,6 +347,13 @@ def publish_state(
     return record
 
 
+def run_detection(detector: YoloBearDetector, frame) -> tuple[list[dict], float]:
+    started_at = time.perf_counter()
+    detections = detector.detect(frame)
+    inference_time_ms = (time.perf_counter() - started_at) * 1000.0
+    return detections, inference_time_ms
+
+
 def main() -> int:
     args = build_parser().parse_args()
     try:
@@ -360,6 +368,7 @@ def main() -> int:
     latest_frame_name = str(
         output_config.get("latest_debug_frame", "latest_camera_ai.jpg")
     )
+    debug_frame_interval_sec = float(output_config.get("debug_frame_interval_sec", 1.0))
     publisher = AiStatePublisher(
         jsonl_stdout=bool(output_config.get("jsonl_stdout", True)) and not args.no_jsonl,
         save_csv=bool(output_config.get("save_csv", True)),
@@ -405,6 +414,27 @@ def main() -> int:
         )
         return 1
 
+    if save_frames:
+        ok, startup_frame = read_frame_with_retries(capture)
+        if ok and startup_frame is not None:
+            save_debug_frame(
+                startup_frame,
+                [],
+                AiState(
+                    camera_device=camera_device,
+                    ai_camera_ok=True,
+                    ai_model_ok=False,
+                    ai_bear_detected=False,
+                    ai_bear_confidence=None,
+                    ai_bear_box_area_ratio=None,
+                    ai_bear_approaching=False,
+                    event="AI_MODEL_LOADING",
+                    inference_time_ms=None,
+                ).to_record(),
+                debug_frame_dir=debug_frame_dir,
+                latest_frame_name=latest_frame_name,
+            )
+
     inference_config = config.get("inference", {})
     try:
         detector, model_path = load_detector_from_candidates(
@@ -434,7 +464,23 @@ def main() -> int:
     inference_interval_sec = float(inference_config.get("inference_interval_sec", 0.5))
     use_display = bool(inference_config.get("use_display", False))
     iteration_count = 0
+    last_detections: list[dict] = []
+    last_record = AiState(
+        camera_device=camera_device,
+        ai_camera_ok=True,
+        ai_model_ok=True,
+        ai_bear_detected=False,
+        ai_bear_confidence=None,
+        ai_bear_box_area_ratio=None,
+        ai_bear_approaching=False,
+        event="AI_WAITING_FOR_INFERENCE",
+        inference_time_ms=None,
+    ).to_record()
+    last_debug_frame_saved_at = 0.0
+    last_inference_completed_at = -inference_interval_sec
+    inference_future: Future | None = None
 
+    executor = ThreadPoolExecutor(max_workers=1)
     try:
         while True:
             ok, frame = read_frame_with_retries(capture)
@@ -451,34 +497,66 @@ def main() -> int:
                 )
                 return 1
 
-            started_at = time.perf_counter()
-            detections = detector.detect(frame)
-            inference_time_ms = (time.perf_counter() - started_at) * 1000.0
-            decision = approach_logic.update(detections)
+            now_monotonic = time.monotonic()
+            completed_inference = False
+            if inference_future is not None and inference_future.done():
+                try:
+                    detections, inference_time_ms = inference_future.result()
+                except Exception:
+                    publish_state(
+                        publisher,
+                        build_fail_safe_state(
+                            camera_device=camera_device,
+                            ai_camera_ok=True,
+                            ai_model_ok=True,
+                            event="AI_RUNTIME_ERROR",
+                        ),
+                        terminal_status=args.terminal_status,
+                    )
+                    return 1
 
-            record = publish_state(
-                publisher,
-                AiState(
-                    camera_device=camera_device,
-                    ai_camera_ok=True,
-                    ai_model_ok=True,
-                    ai_bear_detected=decision.ai_bear_detected,
-                    ai_bear_confidence=decision.ai_bear_confidence,
-                    ai_bear_box_area_ratio=decision.ai_bear_box_area_ratio,
-                    ai_bear_approaching=decision.ai_bear_approaching,
-                    event=decision.event,
-                    inference_time_ms=round(inference_time_ms, 2),
-                ),
-                terminal_status=args.terminal_status,
+                decision = approach_logic.update(detections)
+                last_record = publish_state(
+                    publisher,
+                    AiState(
+                        camera_device=camera_device,
+                        ai_camera_ok=True,
+                        ai_model_ok=True,
+                        ai_bear_detected=decision.ai_bear_detected,
+                        ai_bear_confidence=decision.ai_bear_confidence,
+                        ai_bear_box_area_ratio=decision.ai_bear_box_area_ratio,
+                        ai_bear_approaching=decision.ai_bear_approaching,
+                        event=decision.event,
+                        inference_time_ms=round(inference_time_ms, 2),
+                    ),
+                    terminal_status=args.terminal_status,
+                )
+                last_detections = detections
+                iteration_count += 1
+                completed_inference = True
+                last_inference_completed_at = now_monotonic
+                inference_future = None
+
+            should_start_inference = (
+                inference_future is None
+                and now_monotonic - last_inference_completed_at >= inference_interval_sec
             )
-            if save_frames:
+            if should_start_inference:
+                inference_future = executor.submit(run_detection, detector, frame.copy())
+
+            should_save_debug_frame = (
+                save_frames
+                and now_monotonic - last_debug_frame_saved_at >= debug_frame_interval_sec
+            )
+            if should_save_debug_frame or (save_frames and completed_inference):
                 save_debug_frame(
                     frame,
-                    detections,
-                    record,
+                    last_detections,
+                    last_record,
                     debug_frame_dir=debug_frame_dir,
                     latest_frame_name=latest_frame_name,
                 )
+                last_debug_frame_saved_at = now_monotonic
 
             if use_display:
                 import cv2
@@ -487,13 +565,12 @@ def main() -> int:
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 
-            iteration_count += 1
-            if args.once or (
+            if completed_inference and (args.once or (
                 args.max_iterations is not None
                 and iteration_count >= args.max_iterations
-            ):
+            )):
                 break
-            time.sleep(inference_interval_sec)
+            time.sleep(0.01)
     except KeyboardInterrupt:
         return 0
     except Exception:
@@ -509,6 +586,7 @@ def main() -> int:
         )
         return 1
     finally:
+        executor.shutdown(wait=False, cancel_futures=True)
         capture.release()
         if use_display:
             import cv2

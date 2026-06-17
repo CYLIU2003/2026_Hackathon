@@ -18,7 +18,7 @@ inference:
   confidence_floor: 0.05
   device: "cpu"
   class_ids: []
-  inference_interval_sec: 0.75
+  inference_interval_sec: 2.0
   use_display: false
 
 approach_detection:
@@ -36,6 +36,7 @@ output:
   save_debug_frames: true
   debug_frame_dir: "data/debug_frames"
   latest_debug_frame: "latest_camera_ai.jpg"
+  debug_frame_interval_sec: 1.0
 
 fail_safe:
   default_ai_bear_approaching: false
