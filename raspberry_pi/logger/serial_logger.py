@@ -23,6 +23,9 @@ CSV_FIELDNAMES = [
     "emergency_stop",
     "release_allowed",
     "release_state",
+    "actuator_open",
+    "servo_angle",
+    "auto_test_mode",
     "error_code",
     "error_message",
 ]
@@ -41,7 +44,7 @@ REQUIRED_FIELDS = [
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Arduino Uno Q JSON Lines serial logger")
+    parser = argparse.ArgumentParser(description="Arduino Uno JSON Lines serial logger")
     parser.add_argument("--serial-port", default="/dev/ttyACM0")
     parser.add_argument("--baudrate", type=int, default=115200)
     parser.add_argument("--log-dir", default="data/logs")

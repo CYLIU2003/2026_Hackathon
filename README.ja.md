@@ -63,9 +63,9 @@ RELEASE_OFF
 
 ## ハードウェア構成
 
-### Arduino Uno Q
+### Arduino Uno
 
-Arduino Uno Q は、現場側の接触確認・安全制御基板として残す。
+Arduino Uno は、現場側の接触確認・安全制御基板として残す。
 
 主な役割:
 
@@ -79,9 +79,9 @@ Arduino Uno Q は、現場側の接触確認・安全制御基板として残す
 - serial または network 通信
 ```
 
-Arduino Uno Q / 電気抵抗測定 / 接触パッドロジックは、今後も削除せず文書と実装に残す。camera AI は `ai_bear_approaching` を追加できるが、`paw_contact`、`raw_contact_value`、接触しきい値、緊急停止、RELEASE_OFF フェイルセーフを置き換えない。
+Arduino Uno / 電気抵抗測定 / 接触パッドロジックは、今後も削除せず文書と実装に残す。camera AI は `ai_bear_approaching` を追加できるが、`paw_contact`、`raw_contact_value`、接触しきい値、緊急停止、RELEASE_OFF フェイルセーフを置き換えない。
 
-Arduino Uno Q は、Linuxが動作するMPU側とリアルタイム制御用MCU側を持つため、現場制御に適している。
+Arduino Uno は、低レイテンシなGPIO制御とUSBシリアル通信により、現場側のフェイルセーフ制御に使う。
 
 参考:
 
@@ -101,7 +101,7 @@ Raspberry Pi 4B 4GB は、AIカメラ認識、ログ記録、上位側の状態�
 - OpenCV / V4L2 でカメラキャプチャ
 - 軽量YOLOで熊接近を検出
 - ai_bear_approaching 状態を出力
-- Arduino Uno Q から状態データを受信
+- Arduino Uno から状態データを受信
 - CSVログ保存
 - ダッシュボード表示
 - 最新状態の可視化
@@ -277,7 +277,7 @@ release_allowed = (
 
 ## データ形式
 
-Arduino Uno Q から Raspberry Pi へは JSON Lines を送信する。
+Arduino Uno から Raspberry Pi へは JSON Lines を送信する。
 
 例:
 
@@ -437,7 +437,7 @@ fuser -v /dev/video0
 
 | パス | 担当内容 |
 |---|---|
-| `arduino_uno_q/contact_pad_controller/` | Arduino Uno Q のメイン制御。疑似入力、接触パッド状態遷移、蜂蜜量しきい値判定、RELEASE_ON/OFF出力、LED/GPIO、JSON Lines出力を担当する。 |
+| `arduino_uno_q/contact_pad_controller/` | Arduino Uno のメイン制御。疑似入力、接触パッド状態遷移、蜂蜜量しきい値判定、RELEASE_ON/OFF出力、LED/GPIO、JSON Lines出力を担当する。 |
 | `raspberry_pi/logger/` | Raspberry Pi 側のシリアルロガー。ArduinoとAIのJSON Linesを受信し、CSVログに保存する。 |
 | `raspberry_pi/dashboard/` | デモ・監視用ダッシュボード。接触状態、AI状態、放出状態をまとめて表示する。 |
 | `raspberry_pi/camera_ai/` | 任意のカメラAI知覚レイヤー。`/dev/video0` のカメラテスト、YOLO読み込み、熊接近推定、AI状態出力を担当する。ただし蜂蜜放出を直接命令してはいけない。 |
@@ -493,7 +493,7 @@ fuser -v /dev/video0
 ### Phase 5: 抵抗/接触パッド統合
 
 ```text
-[ ] Arduino Uno Q の接触パッドロジックを維持
+[ ] Arduino Uno の接触パッドロジックを維持
 [ ] raw_contact_value を追加または検証
 [ ] 接触しきい値ロジックを追加
 [ ] 安全なダミー物体でのみ試験
@@ -525,7 +525,7 @@ fuser -v /dev/video0
 ```text
 I will develop the front paw contact pad system as a separate electronic/control module.
 Raspberry Pi 4B with a BUFFALO BSW500M camera will be used for YOLO-based bear approach detection, logging, and dashboard support.
-Arduino Uno Q and the contact/resistance layer remain responsible for contact confirmation and fail-safe release logic.
+Arduino Uno and the contact/resistance layer remain responsible for contact confirmation and fail-safe release logic.
 PCA9685 and a servo motor will be used on the honey release mechanism side.
 Camera AI is an additional perception layer, not the only safety controller.
 ```
@@ -549,8 +549,8 @@ Camera AI is an additional perception layer, not the only safety controller.
 ## MVP v0.1 完了条件
 
 ```text
-[ ] Uno Q が疑似入力を生成できる
-[ ] Uno Q が RELEASE_ON/OFF を判断できる
+[ ] Uno が疑似入力を生成できる
+[ ] Uno が RELEASE_ON/OFF を判断できる
 [ ] Raspberry Pi が /dev/video0 から画像取得できる
 [ ] Camera AI がフェイルセーフな ai_bear_approaching を出力できる
 [ ] LEDまたはserialで RELEASE_ON/OFF が見える
@@ -568,10 +568,10 @@ Camera AI is an additional perception layer, not the only safety controller.
 
 このプロトタイプは **疑似センサー入力** だけでも動作する。実センサーがなくても制御ロジックを確認できる。
 
-### Arduino Uno Q
+### Arduino Uno
 
 1. `arduino_uno_q/contact_pad_controller/contact_pad_controller.ino` を開く。
-2. Arduino Uno Q にビルド・書き込みを行う。
+2. Arduino IDEで **Arduino Uno** を選択し、ビルド・書き込みを行う。
 3. シリアルモニタを **115200 baud** で開く。
 4. JSON Lines 出力を確認する。
 
@@ -666,7 +666,7 @@ python raspberry_pi/dashboard/app.py \
 http://<pi-ip>:8080
 ```
 
-フルデモ時に Arduino Uno Q のシリアルロガーも同時に起動する場合:
+フルデモ時に Arduino Uno のシリアルロガーも同時に起動する場合:
 
 ```bash
 RUN_SERIAL_LOGGER=1 ./scripts/run_demo.sh
@@ -692,7 +692,7 @@ DASHBOARD_PORT=18080 ./scripts/run_demo.sh
 
 ## データ形式メモ
 
-- Arduino Uno Q は **JSON Lines** を送信する。
+- Arduino Uno は **JSON Lines** を送信する。
 - Camera AI も **JSON Lines** を送信する。
 - Raspberry Pi は **CSVログ** を保存する。
 - `timestamp` はリアルタイムクロック追加前は **uptime** (`T+<ms>`) として扱う。

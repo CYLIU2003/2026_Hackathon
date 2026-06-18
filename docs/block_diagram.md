@@ -9,7 +9,7 @@ This diagram shows the MVP data flow and responsibility split.
 [Front Paw Contact Pad Inputs]  (simulated)
     |
     v
-[Arduino Uno Q]
+[Arduino Uno]
   - simulated inputs
   - state machine
   - release decision logic
@@ -27,6 +27,6 @@ This diagram shows the MVP data flow and responsibility split.
 ```
 
 Notes:
-- Arduino Uno Q is the **main safety controller**.
+- Arduino Uno is the **main safety controller**.
 - Raspberry Pi is **logging and visualization only**.
 - Default state is always **RELEASE_OFF**.

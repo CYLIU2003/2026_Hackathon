@@ -76,9 +76,9 @@ RELEASE_OFF
 
 ## Hardware Concept
 
-### Arduino Uno Q
+### Arduino Uno
 
-Arduino Uno Q remains the field-side contact and safety controller.
+Arduino Uno remains the field-side contact and safety controller.
 
 Expected responsibilities:
 
@@ -89,19 +89,14 @@ Expected responsibilities:
 - threshold judgement
 - release decision logic
 - LED / GPIO / release signal output
-- serial or network communication
+- USB serial communication
 ```
 
-Arduino Uno Q / electrical-resistance measurement / contact-pad logic must remain documented and implemented. The camera AI layer can add `ai_bear_approaching`, but it does not replace `paw_contact`, `raw_contact_value`, contact thresholds, emergency stop, or RELEASE_OFF fail-safe behavior.
+Arduino Uno / electrical-resistance measurement / contact-pad logic must remain documented and implemented. The camera AI layer can add `ai_bear_approaching`, but it does not replace `paw_contact`, `raw_contact_value`, contact thresholds, emergency stop, or RELEASE_OFF fail-safe behavior.
 
-Arduino Uno Q is suitable for field control because it combines a Linux-capable MPU side and a real-time MCU side. The official Arduino documentation describes it as a dual-architecture board combining a Qualcomm QRB2210 MPU running Debian-based Linux with an STM32U585 MCU for real-time control.
-
-Reference:
-
-```text
-https://docs.arduino.cc/hardware/uno-q
-https://docs.arduino.cc/tutorials/uno-q/user-manual/
-```
+For the PCA9685 actuator, connect `SDA` to Arduino Uno `A4`, `SCL` to `A5`,
+`VCC` to logic power, and all grounds together. Power the servo from a suitable
+external supply, not from the Uno 5V pin.
 
 ### Raspberry Pi 4B
 
@@ -114,7 +109,7 @@ Expected responsibilities:
 - run OpenCV / V4L2 camera capture
 - run lightweight YOLO bear approach detection
 - publish ai_bear_approaching state
-- receive data from Arduino Uno Q
+- receive data from Arduino Uno
 - save CSV logs
 - show dashboard
 - visualize latest state
@@ -291,7 +286,7 @@ release_allowed = (
 
 ## Data Format
 
-Arduino Uno Q should send JSON Lines.
+Arduino Uno should send JSON Lines.
 
 Example:
 
@@ -462,7 +457,7 @@ fuser -v /dev/video0
 
 | Path | Responsibility |
 |---|---|
-| `arduino_uno_q/contact_pad_controller/` | Main Arduino Uno Q controller. Simulated inputs, contact-pad state machine, honey threshold check, RELEASE_ON/OFF output, LED/GPIO, JSON Lines output. |
+| `arduino_uno_q/contact_pad_controller/` | Main Arduino Uno controller. Simulated inputs, contact-pad state machine, honey threshold check, RELEASE_ON/OFF output, LED/GPIO, JSON Lines output. |
 | `raspberry_pi/logger/` | Raspberry Pi serial logger. Receives Arduino and AI JSON Lines and saves CSV logs. |
 | `raspberry_pi/dashboard/` | Simple dashboard for demo and monitoring. Shows the latest contact, AI, and release state. |
 | `raspberry_pi/camera_ai/` | Optional Raspberry Pi camera AI perception layer. Tests `/dev/video0`, loads YOLO, estimates bear approach, and publishes AI state. It must not directly command honey release. |
@@ -518,7 +513,7 @@ fuser -v /dev/video0
 ### Phase 5: Resistance / Contact-Pad Integration
 
 ```text
-[ ] Keep Arduino Uno Q contact-pad logic
+[ ] Keep Arduino Uno contact-pad logic
 [ ] Add or validate raw_contact_value
 [ ] Add contact threshold logic
 [ ] Test only with safe dummy objects
@@ -552,7 +547,7 @@ Use the following explanation.
 ```text
 I will develop the front paw contact pad system as a separate electronic/control module.
 Raspberry Pi 4B with a BUFFALO BSW500M camera will be used for YOLO-based bear approach detection, logging, and dashboard support.
-Arduino Uno Q and the contact/resistance layer remain responsible for contact confirmation and fail-safe release logic.
+Arduino Uno and the contact/resistance layer remain responsible for contact confirmation and fail-safe release logic.
 PCA9685 and a servo motor will be used on the honey release mechanism side.
 Camera AI is an additional perception layer, not the only safety controller.
 ```
@@ -576,8 +571,8 @@ Camera AI is an additional perception layer, not the only safety controller.
 ## Definition of Done for MVP v0.1
 
 ```text
-[ ] Uno Q can generate simulated inputs
-[ ] Uno Q can decide RELEASE_ON/OFF
+[ ] Uno can generate simulated inputs
+[ ] Uno can decide RELEASE_ON/OFF
 [ ] Raspberry Pi can capture from /dev/video0
 [ ] Camera AI can publish fail-safe ai_bear_approaching
 [ ] RELEASE_ON/OFF is visible through LED or serial output
@@ -595,10 +590,10 @@ Camera AI is an additional perception layer, not the only safety controller.
 
 This prototype uses **simulated sensor inputs** and does not require real sensors.
 
-### Arduino Uno Q
+### Arduino Uno
 
 1. Open `arduino_uno_q/contact_pad_controller/contact_pad_controller.ino`.
-2. Build and upload to Arduino Uno Q.
+2. Select **Arduino Uno** in Arduino IDE, then build and upload.
 3. Open the serial monitor at **115200 baud**.
 4. You should see JSON Lines output.
 
@@ -693,7 +688,7 @@ Open:
 http://<pi-ip>:8080
 ```
 
-To also start the Arduino Uno Q serial logger during the full demo, run:
+To also start the Arduino Uno serial logger during the full demo, run:
 
 ```bash
 RUN_SERIAL_LOGGER=1 ./scripts/run_demo.sh
@@ -719,7 +714,7 @@ Bring-up check already verified on the target Raspberry Pi path:
 
 ## Data Format Notes
 
-- Arduino Uno Q sends **JSON Lines**.
+- Arduino Uno sends **JSON Lines**.
 - Camera AI also sends **JSON Lines**.
 - Raspberry Pi saves **CSV logs**.
 - `timestamp` is emitted as **uptime** (`T+<ms>`) until a real-time clock is added.

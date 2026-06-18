@@ -1,6 +1,9 @@
-# Arduino Uno Q - Contact Pad Controller
+# Arduino Uno - Contact Pad Controller
 
 This module runs the MVP state machine with **simulated inputs**.
+
+The directory name is kept for repository compatibility, but the current sketch
+targets a standard **Arduino Uno**.
 
 ## Files
 
@@ -10,7 +13,7 @@ This module runs the MVP state machine with **simulated inputs**.
 ## How to Run
 
 1. Open the sketch in Arduino IDE.
-2. Select the Arduino Uno Q board.
+2. Select **Arduino Uno** as the board.
 3. Upload the sketch.
 4. Open the serial monitor at **115200 baud**.
 5. If the controller enters `ERROR_SAFE`, send `RESET` on a new line to recover.

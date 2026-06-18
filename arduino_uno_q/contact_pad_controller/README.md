@@ -1,15 +1,258 @@
-# Contact Pad Controller (Arduino Uno Q)
+# 前足接触パッド制御装置 - 動作確認手順書
 
-This sketch runs the MVP state machine using simulated inputs.
+このファイルは **郷田さん** が、ラズパイ（画像認識用）が無い環境でも
+Arduino + PCA9685 + サーボモーターの動作確認ができるように書かれています。
 
-## Build
+プログラミングが得意でなくても大丈夫です。手順のとおりに進めてください。
 
-1. Open `contact_pad_controller.ino` in Arduino IDE.
-2. Select the Arduino Uno Q board.
-3. Upload the sketch.
-4. Open the serial monitor at **115200 baud**.
+---
 
-## Behavior
+## この装置がやること（ざっくり）
 
-- Release signal is **RELEASE_ON** only when all safety conditions are met.
-- On error or emergency stop, it stays **RELEASE_OFF**.
+```
+クマが来たかな？ → 前足でパッドを触ったかな？ → ハチミツは足りてる？
+→ 安全？ → よし、出していいよ！ → サーボが「カチッ」と開く
+→ 時間が来たら「カチッ」と閉じる
+```
+
+今は本物のクマもセンサーもないので、**Arduino が自分で「クマが来た！」と演技します。**
+ラズパイが無くても大丈夫です。
+
+---
+
+## 必要なもの
+
+| 品目 | 個数 | 補足 |
+|---|---|---|
+| Arduino Uno（または Uno Q） | 1台 | USBケーブル付き |
+| PCA9685 サーボドライバ基板 | 1枚 | 16ch PWMドライバ |
+| サーボモーター（MG996R など） | 1個 | |
+| 外部電源（5V〜6V, 2A以上） | 1個 | **Arduino からサーボに給電しないこと** |
+| ジャンパーワイヤー（オス-メス） | 数本 | |
+| パソコン（Windows / Mac どちらでも） | 1台 | Arduino IDE を入れる |
+
+---
+
+## 手順
+
+### 手順 1：Arduino IDE をパソコンに入れる
+
+1. ブラウザで https://www.arduino.cc/en/software を開く
+2. 自分のパソコンに合ったバージョンをダウンロード
+3. ダウンロードしたファイルをダブルクリックしてインストール
+4. インストールが終わったら Arduino IDE を起動
+
+### 手順 2：ライブラリを入れる（1回だけ）
+
+Arduino IDE のメニューから：
+
+1. 左の本マーク（Library Manager）をクリック
+2. 検索窓に `Adafruit PWM Servo` と入力
+3. 「**Adafruit PWM Servo Driver Library**」が出てきたら **INSTALL** をクリック
+4. インストールが終わるまで待つ（数秒）
+
+### 手順 3：配線をする
+
+**重要：サーボは Arduino の 5V ピンから直接給電しないでください。**
+サーボの電流が大きすぎて Arduino が壊れることがあります。
+
+#### 3-A. Arduino Uno と PCA9685 をつなぐ
+
+| PCA9685 側 | Arduino Uno 側 |
+|---|---|
+| VCC | 5V |
+| GND | GND |
+| SDA | A4 |
+| SCL | A5 |
+
+#### 3-B. PCA9685 とサーボモーターをつなぐ
+
+| サーボの線 | PCA9685 側（CH0 = 0番） |
+|---|---|
+| 信号線（オレンジ/黄/白） | CH0 の PWM ピン |
+| 電源＋（赤） | CH0 の V+ |
+| GND（茶/黒） | CH0 の GND |
+
+#### 3-C. 外部電源と PCA9685 をつなぐ
+
+| 外部電源 | PCA9685 側 |
+|---|---|
+| ＋（赤） | 端子台の V+ |
+| −（黒） | 端子台の GND |
+
+#### 3-D. GND 共通化（とても大事！）
+
+**Arduino の GND と PCA9685（外部電源）の GND をつなぐのを忘れないでください。**
+
+これを忘れるとサーボが変な動きをします。
+
+```
+Arduino GND ──── PCA9685 GND
+               └── 外部電源 GND
+```
+
+> 3本の GND がつながっている状態が正解です。
+
+### 手順 4：スケッチを開く
+
+1. Arduino IDE でメニュー → **File** → **Open...**
+2. このリポジトリの `arduino_uno_q/contact_pad_controller/contact_pad_controller.ino` を選ぶ
+3. 開くと同時に `config.h` も自動で開かれる（OKです、そのままで）
+
+### 手順 5：ボードを選ぶ
+
+1. Arduino IDE 上部のボード選択欄をクリック
+2. **Arduino Uno** を選ぶ（Uno Q をお持ちなら Uno Q でも可）
+
+### 手順 6：Arduino をパソコンにつなぐ
+
+USB ケーブルで Arduino をパソコンに接続します。
+
+1. Arduino IDE 上部のポート選択欄で Arduino の COM ポートを選ぶ
+   - Windows の場合：`COM3` や `COM4` など
+   - Mac の場合：`/dev/cu.usbmodem****` など
+   - どれかわからないときは、USB を抜き差しして増えたものを選ぶ
+
+### 手順 7：書き込む
+
+1. Arduino IDE の **→（Upload）ボタン** をクリック
+2. 下の黒い部分に「Done uploading.」と出るまで待つ（数十秒）
+
+### 手順 8：シリアルモニタを開く
+
+1. Arduino IDE 右上の **虫眼鏡マーク（Serial Monitor）** をクリック
+2. 右下の通信速度が **115200 baud** になっていることを確認
+   - なっていなければ 115200 に合わせる
+
+### 手順 9：動作を見る
+
+シリアルモニタに次のような文字が流れ始めます：
+
+```
+{"timestamp":"T+1234ms","state":"IDLE","event":"BOOT","release_state":"RELEASE_OFF","actuator_open":false,...}
+```
+
+これで Arduino は正常に動いています。
+
+---
+
+## 自動デモの流れ
+
+スケッチを書き込んだ瞬間から、自動で以下の流れが繰り返されます：
+
+```
+約 0〜5 秒    IDLE（待機中）
+              → サーボは閉じたまま
+
+約 5〜10 秒   BEAR_DETECTED（クマ発見！）
+              → まだサーボは閉じたまま
+
+約 10〜15 秒  CONTACT_CONFIRMED → READY_TO_RELEASE
+              → RELEASING（ハチミツ放出！）
+              → ★サーボが開く★
+
+約 3 秒後     COOLDOWN（放出終了、クールダウン）
+              → ★サーボが閉じる★
+
+約 5 秒後     IDLE に戻る → 最初から繰り返し
+```
+
+**ポイント**：
+- サーボが「開く」のは `state` が `RELEASING` のときだけ
+- それ以外の状態では必ず閉じています
+- 安全が確認できないと絶対に開きません
+
+最初にサーボが「キュッ」と音を立てて閉位置（0度）に動きます。それは正常です。
+
+---
+
+## もし動かなかったら
+
+### サーボがまったく動かない
+
+1. **外部電源は入っていますか？** — PCA9685 の端子台に 5V〜6V が来ているか確認
+2. **GND は共通化されていますか？** — Arduino GND と外部電源 GND がつながっているか確認
+3. **配線が正しいか？** — SDA=A4, SCL=A5 に刺さっているか確認
+4. **ライブラリは入っていますか？** — 「手順2」をやり直してみる
+
+### サーボがプルプル震える / 変な方向に回る
+
+1. **外部電源の電圧が足りているか確認**（MG996R は最低 5V、できれば 6V）
+2. **GND 共通化の確認** — これが原因で一番多いです
+
+### シリアルモニタに何も出ない
+
+1. **通信速度が 115200 になっているか確認**
+2. **Arduino IDE のポート選択が正しいか確認**
+3. Arduino のリセットボタンを1回押してみる
+
+### シリアルモニタに文字化けが出る
+
+通信速度が 115200 になっているか確認してください。
+
+---
+
+## もっと詳しいテストをしたいとき
+
+シリアルモニタの **送信欄**（上の白い入力欄）から以下のコマンドを送れます。
+
+| コマンド | 意味 |
+|---|---|
+| `TEST_AUTO_ON` | 自動デモを再開 |
+| `TEST_AUTO_OFF` | 自動デモを停止 |
+| `SET AI_BEAR 1` | 「クマを見つけた」と手動で知らせる |
+| `SET PAW 1` | 「前足がパッドに触れた」と手動で知らせる |
+| `SET HONEY 80` | ハチミツ量を 80% に設定 |
+| `SET ESTOP 1` | 緊急停止！（サーボは即座に閉じます） |
+| `RESET` | 緊急停止から復帰 |
+
+**やってみよう**：
+
+1. まず `TEST_AUTO_OFF` を送信（自動デモ停止）
+2. `SET AI_BEAR 1` → `SET PAW 1` → `SET HONEY 80` → `SET SAFE 1` → `SET ESTOP 0` を順に送信
+3. 数秒後にサーボが開くのを確認
+4. `SET ESTOP 1` を送信 → サーボがすぐ閉じるのを確認
+5. `RESET` を送信 → 復帰
+
+---
+
+## PC で仮想ラズパイテストをする（オプション）
+
+パソコン側で Python が動かせる場合、以下のコマンドで
+「ラズパイの代わりをする」テストができます：
+
+```bash
+python raspberry_pi/integration/fake_bear_to_actuator.py --port COM3 --loop
+```
+
+`COM3` の部分は Arduino のポート番号に変えてください。
+
+Linux / Mac の場合：
+```bash
+python3 raspberry_pi/integration/fake_bear_to_actuator.py --port /dev/ttyACM0 --loop
+```
+
+---
+
+## 補足：最終形のイメージ
+
+```
+[Raspberry Pi + カメラ]           ← あとで追加
+       │
+       ▼
+[Arduino + 接触パッド制御]        ← ★ここが今の担当範囲★
+       │
+       ▼
+[PCA9685 + サーボ + ハチミツ機構]  ← 郷田さん担当
+```
+
+今は Raspberry Pi が無くても、Arduino が一人で演技してくれるので
+サーボ機構の動作確認ができます。
+
+実際の YOLO カメラが完成したら、Raspberry Pi 側を `fake_bear_to_actuator.py`
+から `run_camera_ai.py` に差し替えるだけで連携できます。
+
+---
+
+このスケッチは模擬センサー入力を使っています。
+実際のセンサーは後日取り付けます。

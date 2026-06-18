@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Arduino.h>
+
 const int PIN_RELEASE_LED = 13;
 const int PIN_RELEASE_SIGNAL = 8;
 const int PIN_EMERGENCY_STOP = 7;
@@ -18,3 +20,12 @@ const unsigned long SENSOR_UPDATE_INTERVAL_MS = 100;
 const int SERIAL_BAUDRATE = 115200;
 
 const int DEFAULT_HONEY_AMOUNT_PERCENT = 80;
+
+const uint8_t GODA_PCA9685_I2C_ADDRESS = 0x40;
+const uint8_t GODA_SERVO_CHANNEL = 0;
+const int GODA_SERVO_MIN_PULSE = 150;
+const int GODA_SERVO_MAX_PULSE = 500;
+const int GODA_SERVO_CLOSED_ANGLE = 0;
+const int GODA_SERVO_OPEN_ANGLE = 90;
+const int GODA_SERVO_STEP_DEG = 5;
+const int GODA_SERVO_STEP_DELAY_MS = 15;

@@ -1,13 +1,118 @@
+/*
+  A1 Front Paw Contact Pad System
+  Standalone Goda PCA9685 Servo Actuator + Contact Pad Controller
+
+  Purpose:
+    - Keep the existing safety state machine.
+    - Use Goda-san's PCA9685 + servo code only as the actuator layer.
+    - Drive the honey release servo only while state == RELEASING.
+    - Provide test modes for cases where Raspberry Pi is unavailable.
+
+  このファイルは standalone 参照用です。
+  メインのスケッチは contact_pad_controller/contact_pad_controller.ino です。
+
+  Arduino IDE で開くときは actuator_standalone フォルダごと開いてください。
+
+  Required Arduino IDE library:
+    - Adafruit PWM Servo Driver Library
+*/
+
 #include <Arduino.h>
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
-#include "config.h"
 
-Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(GODA_PCA9685_I2C_ADDRESS);
+// -----------------------------------------------------------------------------
+// 設定値（config.h の代わり。このファイル単体で完結します）
+// メインスケッチでは config.h を使います。
+// -----------------------------------------------------------------------------
+const int PIN_RELEASE_LED = 13;
+const int PIN_RELEASE_SIGNAL = 8;
+const int PIN_STATUS_LED = 12;
+const int HONEY_MIN_THRESHOLD_PERCENT = 20;
+const unsigned long CONTACT_CONFIRM_DURATION_MS = 500;
+const unsigned long MAX_RELEASE_DURATION_MS = 3000;
+const unsigned long COOLDOWN_AFTER_RELEASE_MS = 5000;
+const unsigned long MESSAGE_INTERVAL_MS = 1000;
+const unsigned long SENSOR_UPDATE_INTERVAL_MS = 100;
+const int SERIAL_BAUDRATE = 115200;
+const int DEFAULT_HONEY_AMOUNT_PERCENT = 80;
 
-int current_servo_angle = GODA_SERVO_CLOSED_ANGLE;
+// -----------------------------------------------------------------------------
+// Goda actuator settings: PCA9685 + servo motor
+// -----------------------------------------------------------------------------
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40);
+
+const uint8_t SERVO_CHANNEL = 0;
+const int SERVO_MIN_PULSE = 150;  // 0 deg approximate count at 50 Hz
+const int SERVO_MAX_PULSE = 500;  // 180 deg approximate count at 50 Hz
+const int SERVO_CLOSED_ANGLE = 0;
+const int SERVO_OPEN_ANGLE = 90;  // Start safely. Tune after mechanical check.
+const int SERVO_STEP_DEG = 5;
+const int SERVO_STEP_DELAY_MS = 15;
+const unsigned long ACTUATOR_REFRESH_INTERVAL_MS = 250;
+
+int current_servo_angle = SERVO_CLOSED_ANGLE;
 bool actuator_open = false;
+unsigned long last_actuator_refresh_ms = 0;
 
+int angleToPulse(int angle) {
+  angle = constrain(angle, 0, 180);
+  return map(angle, 0, 180, SERVO_MIN_PULSE, SERVO_MAX_PULSE);
+}
+
+void writeServoAngle(int angle) {
+  angle = constrain(angle, 0, 180);
+  pwm.setPWM(SERVO_CHANNEL, 0, angleToPulse(angle));
+  current_servo_angle = angle;
+}
+
+void moveServoSmooth(int targetAngle) {
+  targetAngle = constrain(targetAngle, 0, 180);
+  if (targetAngle == current_servo_angle) {
+    writeServoAngle(targetAngle);
+    return;
+  }
+
+  int direction = (targetAngle > current_servo_angle) ? 1 : -1;
+  int angle = current_servo_angle;
+
+  while (angle != targetAngle) {
+    angle += direction * SERVO_STEP_DEG;
+    if ((direction > 0 && angle > targetAngle) || (direction < 0 && angle < targetAngle)) {
+      angle = targetAngle;
+    }
+    writeServoAngle(angle);
+    delay(SERVO_STEP_DELAY_MS);
+  }
+}
+
+void closeReleaseGate() {
+  if (actuator_open || current_servo_angle != SERVO_CLOSED_ANGLE) {
+    moveServoSmooth(SERVO_CLOSED_ANGLE);
+  }
+  actuator_open = false;
+}
+
+void openReleaseGate() {
+  if (!actuator_open || current_servo_angle != SERVO_OPEN_ANGLE) {
+    moveServoSmooth(SERVO_OPEN_ANGLE);
+  }
+  actuator_open = true;
+}
+
+void initReleaseActuator() {
+  Wire.begin();
+  pwm.begin();
+  pwm.setOscillatorFrequency(27000000);
+  pwm.setPWMFreq(50);
+  delay(10);
+  writeServoAngle(SERVO_CLOSED_ANGLE);
+  actuator_open = false;
+}
+
+// -----------------------------------------------------------------------------
+// State machine
+// -----------------------------------------------------------------------------
 enum State {
   IDLE,
   BEAR_DETECTED,
@@ -18,8 +123,6 @@ enum State {
   ERROR_SAFE
 };
 
-void enter_state(State next_state, const char *next_event);
-
 State state = IDLE;
 State previous_state = IDLE;
 
@@ -28,6 +131,7 @@ const char *release_state = "RELEASE_OFF";
 const char *error_code = "ERR_NONE";
 const char *error_message = NULL;
 
+// Inputs. These can be driven by internal test mode or serial commands.
 bool simulated_bear_detected = false;
 bool simulated_paw_contact = false;
 int simulated_honey_amount_percent = DEFAULT_HONEY_AMOUNT_PERCENT;
@@ -38,14 +142,17 @@ bool bear_detected = false;
 bool paw_contact = false;
 int honey_amount_percent = DEFAULT_HONEY_AMOUNT_PERCENT;
 bool system_safe = true;
+
 bool contact_confirmed = false;
 bool honey_enough = true;
 bool release_allowed = false;
 bool reset_requested = false;
-bool auto_test_mode = true;
 
+// Test mode. ON by default so Arduino alone can demonstrate the sequence.
+bool auto_test_mode = true;
 int simulation_step = 0;
 unsigned long simulation_step_started_at_ms = 0;
+const unsigned long SIMULATION_STEP_DURATION_MS = 5000;
 
 unsigned long current_time_ms = 0;
 unsigned long state_entered_at_ms = 0;
@@ -55,83 +162,19 @@ unsigned long cooldown_started_at_ms = 0;
 unsigned long last_message_sent_at_ms = 0;
 unsigned long last_sensor_update_at_ms = 0;
 
-const unsigned long SIMULATION_STEP_DURATION_MS = 5000;
 char serial_command_buffer[80];
 int serial_command_length = 0;
 
-int angle_to_pulse(int angle) {
-  angle = constrain(angle, 0, 180);
-  return map(angle, 0, 180, GODA_SERVO_MIN_PULSE, GODA_SERVO_MAX_PULSE);
-}
-
-void write_servo_angle(int angle) {
-  angle = constrain(angle, 0, 180);
-  pwm.setPWM(GODA_SERVO_CHANNEL, 0, angle_to_pulse(angle));
-  current_servo_angle = angle;
-}
-
-void move_servo_smooth(int target_angle) {
-  target_angle = constrain(target_angle, 0, 180);
-  if (target_angle == current_servo_angle) {
-    write_servo_angle(target_angle);
-    return;
-  }
-
-  int direction = (target_angle > current_servo_angle) ? 1 : -1;
-  int angle = current_servo_angle;
-
-  while (angle != target_angle) {
-    angle += direction * GODA_SERVO_STEP_DEG;
-    if ((direction > 0 && angle > target_angle) || (direction < 0 && angle < target_angle)) {
-      angle = target_angle;
-    }
-    write_servo_angle(angle);
-    delay(GODA_SERVO_STEP_DELAY_MS);
-  }
-}
-
-void close_release_gate() {
-  if (actuator_open || current_servo_angle != GODA_SERVO_CLOSED_ANGLE) {
-    move_servo_smooth(GODA_SERVO_CLOSED_ANGLE);
-  }
-  actuator_open = false;
-}
-
-void open_release_gate() {
-  if (!actuator_open || current_servo_angle != GODA_SERVO_OPEN_ANGLE) {
-    move_servo_smooth(GODA_SERVO_OPEN_ANGLE);
-  }
-  actuator_open = true;
-}
-
-void init_release_actuator() {
-  Wire.begin();
-  pwm.begin();
-  pwm.setOscillatorFrequency(27000000);
-  pwm.setPWMFreq(50);
-  delay(10);
-  write_servo_angle(GODA_SERVO_CLOSED_ANGLE);
-  actuator_open = false;
-}
-
 const char *state_to_string(State value) {
   switch (value) {
-    case IDLE:
-      return "IDLE";
-    case BEAR_DETECTED:
-      return "BEAR_DETECTED";
-    case CONTACT_CONFIRMED:
-      return "CONTACT_CONFIRMED";
-    case READY_TO_RELEASE:
-      return "READY_TO_RELEASE";
-    case RELEASING:
-      return "RELEASING";
-    case COOLDOWN:
-      return "COOLDOWN";
-    case ERROR_SAFE:
-      return "ERROR_SAFE";
-    default:
-      return "ERROR_SAFE";
+    case IDLE: return "IDLE";
+    case BEAR_DETECTED: return "BEAR_DETECTED";
+    case CONTACT_CONFIRMED: return "CONTACT_CONFIRMED";
+    case READY_TO_RELEASE: return "READY_TO_RELEASE";
+    case RELEASING: return "RELEASING";
+    case COOLDOWN: return "COOLDOWN";
+    case ERROR_SAFE: return "ERROR_SAFE";
+    default: return "ERROR_SAFE";
   }
 }
 
@@ -152,6 +195,24 @@ void request_reset() {
 void clear_serial_command_buffer() {
   serial_command_length = 0;
   serial_command_buffer[0] = '\0';
+}
+
+void enter_state(State next_state, const char *next_event) {
+  if (state == next_state) {
+    return;
+  }
+
+  previous_state = state;
+  state = next_state;
+  event_name = next_event;
+  state_entered_at_ms = current_time_ms;
+
+  if (state == RELEASING) {
+    release_started_at_ms = current_time_ms;
+  }
+  if (state == COOLDOWN) {
+    cooldown_started_at_ms = current_time_ms;
+  }
 }
 
 void set_manual_input(const char *key, int value) {
@@ -179,6 +240,7 @@ void set_manual_input(const char *key, int value) {
 }
 
 void handle_serial_command(char *command) {
+  // Trim leading spaces.
   while (*command == ' ') {
     command++;
   }
@@ -222,7 +284,6 @@ void handle_serial_command(char *command) {
       set_manual_input(key, value);
       return;
     }
-
     set_error("ERR_BAD_SET_COMMAND", "expected: SET KEY VALUE");
     enter_state(ERROR_SAFE, "BAD_SERIAL_COMMAND");
     return;
@@ -252,25 +313,6 @@ void process_serial_commands() {
     if (serial_command_length < static_cast<int>(sizeof(serial_command_buffer)) - 1) {
       serial_command_buffer[serial_command_length++] = incoming;
     }
-  }
-}
-
-void enter_state(State next_state, const char *next_event) {
-  if (state == next_state) {
-    return;
-  }
-
-  previous_state = state;
-  state = next_state;
-  event_name = next_event;
-  state_entered_at_ms = current_time_ms;
-
-  if (state == RELEASING) {
-    release_started_at_ms = current_time_ms;
-  }
-
-  if (state == COOLDOWN) {
-    cooldown_started_at_ms = current_time_ms;
   }
 }
 
@@ -337,7 +379,6 @@ bool inputs_valid() {
     set_error("ERR_INVALID_HONEY_AMOUNT", "honey_amount_percent out of range");
     return false;
   }
-
   return true;
 }
 
@@ -346,7 +387,6 @@ void update_confirmed_contact() {
     if (last_contact_time_ms == 0) {
       last_contact_time_ms = current_time_ms;
     }
-
     if (current_time_ms - last_contact_time_ms >= CONTACT_CONFIRM_DURATION_MS) {
       contact_confirmed = true;
     }
@@ -373,21 +413,21 @@ void process_state_machine() {
   }
 
   if (emergency_stop) {
-    close_release_gate();
+    closeReleaseGate();
     set_error("ERR_EMERGENCY_STOP", "emergency_stop active");
     enter_state(ERROR_SAFE, "EMERGENCY_STOP");
     return;
   }
 
   if (!inputs_valid()) {
-    close_release_gate();
+    closeReleaseGate();
     enter_state(ERROR_SAFE, "INVALID_INPUT");
     return;
   }
 
   if (state == ERROR_SAFE) {
-    close_release_gate();
-    if (reset_requested && inputs_valid()) {
+    closeReleaseGate();
+    if (reset_requested && inputs_valid() && !emergency_stop) {
       clear_error();
       reset_requested = false;
       enter_state(IDLE, "RESET");
@@ -401,6 +441,7 @@ void process_state_machine() {
         enter_state(BEAR_DETECTED, "BEAR_DETECTED");
       }
       break;
+
     case BEAR_DETECTED:
       if (!bear_detected) {
         enter_state(IDLE, "IDLE");
@@ -408,6 +449,7 @@ void process_state_machine() {
         enter_state(CONTACT_CONFIRMED, "CONTACT_CONFIRMED");
       }
       break;
+
     case CONTACT_CONFIRMED:
       if (!bear_detected) {
         enter_state(IDLE, "IDLE");
@@ -419,6 +461,7 @@ void process_state_machine() {
         event_name = "HONEY_LOW";
       }
       break;
+
     case READY_TO_RELEASE:
       if (release_allowed) {
         enter_state(RELEASING, "RELEASE_START");
@@ -426,82 +469,88 @@ void process_state_machine() {
         enter_state(CONTACT_CONFIRMED, "CONTACT_CONFIRMED");
       }
       break;
+
     case RELEASING:
       if (!release_allowed) {
-        enter_state(COOLDOWN, "RELEASE_ABORTED");
-      } else if (!system_safe || !bear_detected || !paw_contact || !honey_enough) {
         enter_state(COOLDOWN, "RELEASE_ABORTED");
       } else if (current_time_ms - release_started_at_ms >= MAX_RELEASE_DURATION_MS) {
         enter_state(COOLDOWN, "RELEASE_TIMEOUT");
       }
       break;
+
     case COOLDOWN:
       if (current_time_ms - cooldown_started_at_ms >= COOLDOWN_AFTER_RELEASE_MS) {
         enter_state(IDLE, "COOLDOWN_END");
       }
       break;
+
     case ERROR_SAFE:
       break;
+
     default:
-      enter_state(ERROR_SAFE, "ERROR");
       set_error("ERR_INVALID_STATE", "unknown state");
+      enter_state(ERROR_SAFE, "ERROR");
       break;
   }
 }
 
+String timestamp_string() {
+  return String("T+") + String(current_time_ms) + "ms";
+}
+
 void print_bool(bool value) {
-  Serial.print(value ? F("true") : F("false"));
+  Serial.print(value ? "true" : "false");
 }
 
 void print_nullable_string(const char *value) {
   if (value == NULL) {
-    Serial.print(F("null"));
+    Serial.print("null");
   } else {
-    Serial.print(F("\""));
+    Serial.print("\"");
     Serial.print(value);
-    Serial.print(F("\""));
+    Serial.print("\"");
   }
 }
 
 void emit_json_line() {
-  Serial.print(F("{\"timestamp\":\"T+"));
-  Serial.print(current_time_ms);
-  Serial.print(F("ms\",\"state\":\""));
+  Serial.print("{\"timestamp\":\"");
+  Serial.print(timestamp_string());
+  Serial.print("\",\"state\":\"");
   Serial.print(state_to_string(state));
-  Serial.print(F("\",\"previous_state\":\""));
+  Serial.print("\",\"previous_state\":\"");
   Serial.print(state_to_string(previous_state));
-  Serial.print(F("\",\"event\":\""));
+  Serial.print("\",\"event\":\"");
   Serial.print(event_name);
-  Serial.print(F("\",\"bear_detected\":"));
+  Serial.print("\",\"bear_detected\":");
   print_bool(bear_detected);
-  Serial.print(F(",\"paw_contact\":"));
+  Serial.print(",\"paw_contact\":");
   print_bool(paw_contact);
-  Serial.print(F(",\"contact_confirmed\":"));
+  Serial.print(",\"contact_confirmed\":");
   print_bool(contact_confirmed);
-  Serial.print(F(",\"raw_contact_value\":null"));
-  Serial.print(F(",\"honey_amount_percent\":"));
+  Serial.print(",\"raw_contact_value\":null");
+  Serial.print(",\"honey_amount_percent\":");
   Serial.print(honey_amount_percent);
-  Serial.print(F(",\"honey_enough\":"));
+  Serial.print(",\"honey_enough\":");
   print_bool(honey_enough);
-  Serial.print(F(",\"system_safe\":"));
+  Serial.print(",\"system_safe\":");
   print_bool(system_safe);
-  Serial.print(F(",\"emergency_stop\":"));
+  Serial.print(",\"emergency_stop\":");
   print_bool(emergency_stop);
-  Serial.print(F(",\"release_allowed\":"));
+  Serial.print(",\"release_allowed\":");
   print_bool(release_allowed);
-  Serial.print(F(",\"release_state\":\""));
+  Serial.print(",\"release_state\":\"");
   Serial.print(release_state);
-  Serial.print(F("\",\"actuator_open\":"));
+  Serial.print("\",\"actuator_open\":");
   print_bool(actuator_open);
-  Serial.print(F(",\"servo_angle\":"));
+  Serial.print(",\"servo_angle\":");
   Serial.print(current_servo_angle);
-  Serial.print(F(",\"auto_test_mode\":"));
+  Serial.print(",\"auto_test_mode\":");
   print_bool(auto_test_mode);
-  Serial.print(F(",\"error_code\":\""));
+  Serial.print(",\"error_code\":\"");
   Serial.print(error_code);
-  Serial.print(F("\",\"error_message\":"));
+  Serial.print("\",\"error_message\":");
   print_nullable_string(error_message);
-  Serial.print(F("}"));
+  Serial.print("}");
   Serial.println();
 }
 
@@ -513,10 +562,13 @@ void update_outputs() {
   digitalWrite(PIN_RELEASE_LED, should_release ? HIGH : LOW);
   digitalWrite(PIN_STATUS_LED, state == IDLE ? LOW : HIGH);
 
-  if (should_release) {
-    open_release_gate();
-  } else {
-    close_release_gate();
+  if (current_time_ms - last_actuator_refresh_ms >= ACTUATOR_REFRESH_INTERVAL_MS) {
+    last_actuator_refresh_ms = current_time_ms;
+    if (should_release) {
+      openReleaseGate();
+    } else {
+      closeReleaseGate();
+    }
   }
 }
 
@@ -526,12 +578,12 @@ void setup() {
   pinMode(PIN_STATUS_LED, OUTPUT);
 
   Serial.begin(SERIAL_BAUDRATE);
-
   current_time_ms = millis();
   state_entered_at_ms = current_time_ms;
   simulation_step_started_at_ms = current_time_ms;
+
   clear_serial_command_buffer();
-  init_release_actuator();
+  initReleaseActuator();
 
   update_inputs();
   update_outputs();
