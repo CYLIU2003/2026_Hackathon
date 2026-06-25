@@ -61,3 +61,35 @@ timestamp,state,previous_state,event,bear_detected,paw_contact,contact_confirmed
 Rules:
 - Always write the header for a new file.
 - Missing optional fields should be written as empty values.
+
+---
+
+## Unified Feeding Decision CSV (Presentation Mirror)
+
+Default path:
+
+```text
+data/logs/feeding_decision_log.csv
+```
+
+This Raspberry Pi output combines Camera AI and simulated contact-pad inputs
+for logging, dashboard display, and integration rehearsal. It is not the
+authoritative physical release controller.
+
+Key columns:
+
+```csv
+timestamp,input_mode,state,presentation_state,event,camera_status,bear_detected,bear_approaching,confidence,bear_box_area_ratio,contact_detected,contact_confirmed,impedance_kohm,honey_amount_percent,system_safe,emergency_stop,safety_decision,release_state,servo_command,log_status,error_code
+```
+
+Presentation aliases:
+
+```text
+READY_TO_RELEASE -> SAFE_TO_FEED
+RELEASING        -> FEEDING
+RELEASE_ON       -> servo_command=RELEASE
+RELEASE_OFF      -> servo_command=HOLD
+```
+
+On missing/stale Camera AI data, invalid values, emergency stop, or an
+exception, the mirror must show `ERROR_SAFE`, `RELEASE_OFF`, and `HOLD`.

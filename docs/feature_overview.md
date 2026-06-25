@@ -31,6 +31,7 @@ release.
 | Arduino Uno Q simulated contact-pad controller | Implemented | `arduino_uno_q/contact_pad_controller/contact_pad_controller.ino`, `config.h` |
 | Release safety state machine | Implemented | `arduino_uno_q/contact_pad_controller/`, `tests/test_decision_logic.py` |
 | Raspberry Pi serial CSV logger | Implemented | `raspberry_pi/logger/serial_logger.py` |
+| Camera + mock contact safety decision mirror | Implemented | `raspberry_pi/safety_control/safety_controller.py` |
 | Raspberry Pi dashboard | Implemented | `raspberry_pi/dashboard/app.py` |
 | USB camera smoke test | Implemented | `raspberry_pi/camera_ai/camera_test.py` |
 | Camera AI detection loop | Implemented | `raspberry_pi/camera_ai/run_camera_ai.py` |
@@ -47,11 +48,18 @@ release.
 
 Use these commands from the repository root on the Raspberry Pi.
 
-Camera AI + dashboard:
+Camera AI + mock contact safety decision + CSV + dashboard:
 
 ```bash
 ./scripts/run_demo.sh
 ```
+
+The dashboard reads `data/logs/feeding_decision_log.csv` and presents the system
+as a feeding decision pipeline. The mirror emits `SAFE_TO_FEED`,
+`RELEASE/HOLD`, timeout, cooldown, and fail-safe status. It never directly
+drives the physical servo.
+
+Example output: `examples/sample_feeding_decision_log.csv`.
 
 Camera AI only:
 
@@ -96,4 +104,3 @@ http://127.0.0.1:8081
 | `data/debug_frames/` | Runtime camera frames | Ignored |
 | `data/datasets/` | Training datasets and COCO cache | Ignored |
 | `a1_camera_ai_colab_artifacts.zip` | Raw Colab download | Ignored after import |
-

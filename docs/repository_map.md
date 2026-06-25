@@ -38,6 +38,7 @@ This file is the quick index for where each kind of work should live.
 | Path | Role |
 |---|---|
 | `raspberry_pi/camera_ai/` | Camera capture, YOLO inference, AI state publishing, model tooling |
+| `raspberry_pi/safety_control/` | Camera + mock contact integration, demo state machine, unified CSV |
 | `raspberry_pi/dashboard/` | Browser dashboard for logs and latest camera image |
 | `raspberry_pi/logger/` | Serial JSON Lines to CSV logger |
 | `raspberry_pi/README.md` | Raspberry Pi module index |
@@ -79,6 +80,7 @@ This file is the quick index for where each kind of work should live.
 | `tests/test_decision_logic.py` | Contact-pad/release safety logic |
 | `tests/test_camera_ai_*.py` | Camera AI helper behavior |
 | `tests/test_dashboard.py` | Dashboard route behavior |
+| `tests/test_safety_controller.py` | Integrated demo state machine and fail-safe behavior |
 
 ## Where New Work Should Go
 
@@ -86,8 +88,8 @@ This file is the quick index for where each kind of work should live.
 |---|---|
 | New contact-pad state logic | `arduino_uno_q/contact_pad_controller/` |
 | New Raspberry Pi camera behavior | `raspberry_pi/camera_ai/` |
+| New presentation-side decision integration | `raspberry_pi/safety_control/` |
 | New web display for logs/images | `raspberry_pi/dashboard/` or `web_camera_ai.py` if tied to live camera |
 | New interface contracts | `docs/interface_spec.md` or `docs/camera_ai_interface_spec.md` |
 | New demo script | `scripts/` |
 | New sample data | `examples/` |
-

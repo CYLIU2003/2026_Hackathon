@@ -92,8 +92,33 @@ HTML_TEMPLATE = """
       .ok { color: var(--ok); }
       .warn { color: var(--warn); }
       .error { color: var(--error); }
+      .decision {
+        grid-column: 1 / -1;
+        border-left: 6px solid var(--ok);
+      }
+      .decision-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(150px, 1fr));
+        gap: 10px;
+      }
+      .decision-item {
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        padding: 10px;
+      }
+      .decision-label {
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 5px;
+      }
+      .decision-value {
+        font-size: 17px;
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
       @media (max-width: 860px) {
         main { grid-template-columns: 1fr; padding: 12px; }
+        .decision-grid { grid-template-columns: 1fr 1fr; }
       }
     </style>
   </head>
@@ -103,6 +128,52 @@ HTML_TEMPLATE = """
       <div class="muted">Remote monitor for Camera AI, contact-pad state, and fail-safe release status.</div>
     </header>
     <main>
+      <section class="decision">
+        <h2>Feeding Safety Decision</h2>
+        {% if row %}
+          <div class="decision-grid">
+            <div class="decision-item">
+              <div class="decision-label">Current State</div>
+              <div class="decision-value">{{ row.get('presentation_state', row.get('state', '-')) }}</div>
+            </div>
+            <div class="decision-item">
+              <div class="decision-label">Camera Status</div>
+              <div class="decision-value">{{ row.get('camera_status', '-') }}</div>
+            </div>
+            <div class="decision-item">
+              <div class="decision-label">Bear Detection</div>
+              <div class="decision-value">{{ row.get('bear_detected', '-') }}</div>
+            </div>
+            <div class="decision-item">
+              <div class="decision-label">Confidence</div>
+              <div class="decision-value">{{ row.get('confidence', '-') }}</div>
+            </div>
+            <div class="decision-item">
+              <div class="decision-label">Contact Pad</div>
+              <div class="decision-value">{{ 'Confirmed' if truthy(row.get('contact_confirmed')) else 'Waiting' }}</div>
+            </div>
+            <div class="decision-item">
+              <div class="decision-label">Safety Decision</div>
+              <div class="decision-value">{{ row.get('safety_decision', row.get('event', '-')) }}</div>
+            </div>
+            <div class="decision-item">
+              <div class="decision-label">Servo Command</div>
+              <div class="decision-value">{{ row.get('servo_command', row.get('release_state', 'HOLD')) }}</div>
+            </div>
+            <div class="decision-item">
+              <div class="decision-label">CSV Log</div>
+              <div class="decision-value">{{ row.get('log_status', 'SAVED') }}</div>
+            </div>
+            <div class="decision-item">
+              <div class="decision-label">Input Mode</div>
+              <div class="decision-value">{{ row.get('input_mode', 'ARDUINO_SERIAL') }}</div>
+            </div>
+          </div>
+        {% else %}
+          <p>No integrated safety-decision data found yet. Output remains HOLD.</p>
+        {% endif %}
+      </section>
+
       <section>
         <h2>Camera AI View</h2>
         {% if camera_frame_available %}
@@ -144,7 +215,7 @@ HTML_TEMPLATE = """
       </section>
 
       <section>
-        <h2>Contact Pad State</h2>
+        <h2>Safety Control Details</h2>
         {% if row %}
           <table>
             <tr><th>timestamp</th><td>{{ row.get('timestamp') }}</td></tr>
@@ -152,7 +223,10 @@ HTML_TEMPLATE = """
             <tr><th>event</th><td>{{ row.get('event') }}</td></tr>
             <tr><th>release_state</th><td>{{ row.get('release_state') }}</td></tr>
             <tr><th>bear_detected</th><td>{{ row.get('bear_detected') }}</td></tr>
-            <tr><th>paw_contact</th><td>{{ row.get('paw_contact') }}</td></tr>
+            <tr><th>bear_approaching</th><td>{{ row.get('bear_approaching', '') }}</td></tr>
+            <tr><th>contact_detected</th><td>{{ row.get('contact_detected', row.get('paw_contact', '')) }}</td></tr>
+            <tr><th>contact_confirmed</th><td>{{ row.get('contact_confirmed', '') }}</td></tr>
+            <tr><th>impedance_kohm</th><td>{{ row.get('impedance_kohm', row.get('raw_contact_value', '')) }}</td></tr>
             <tr><th>honey_amount_percent</th><td>{{ row.get('honey_amount_percent') }}</td></tr>
             <tr><th>system_safe</th><td>{{ row.get('system_safe') }}</td></tr>
             <tr><th>emergency_stop</th><td>{{ row.get('emergency_stop') }}</td></tr>
@@ -230,6 +304,7 @@ def create_app(
 ) -> Flask:
     app = Flask(__name__)
     app.jinja_env.globals["status_pill"] = status_pill
+    app.jinja_env.globals["truthy"] = truthy
     log_dir = log_dir.resolve()
     debug_frame_dir = debug_frame_dir.resolve()
     resolved_log_file = str(Path(log_file).resolve()) if log_file else ""

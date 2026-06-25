@@ -8,8 +8,13 @@ CAMERA_DEVICE="${CAMERA_DEVICE:-/dev/video0}"
 DASHBOARD_HOST="${DASHBOARD_HOST:-0.0.0.0}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-8080}"
 RUN_CAMERA_AI="${RUN_CAMERA_AI:-1}"
+RUN_SAFETY_CONTROL="${RUN_SAFETY_CONTROL:-1}"
+SAFETY_INPUT_MODE="${SAFETY_INPUT_MODE:-camera}"
 RUN_SERIAL_LOGGER="${RUN_SERIAL_LOGGER:-0}"
 RUN_DASHBOARD="${RUN_DASHBOARD:-1}"
+MOCK_CONTACT="${MOCK_CONTACT:-1}"
+MOCK_IMPEDANCE_KOHM="${MOCK_IMPEDANCE_KOHM:-92.4}"
+HONEY_AMOUNT_PERCENT="${HONEY_AMOUNT_PERCENT:-80}"
 if [[ -z "${PYTHON_BIN:-}" && -x ".venv/bin/python" ]]; then
   PYTHON_BIN=".venv/bin/python"
 else
@@ -49,6 +54,23 @@ if [[ "${RUN_CAMERA_AI}" == "1" ]]; then
   child_pids+=("$!")
 fi
 
+if [[ "${RUN_SAFETY_CONTROL}" == "1" ]]; then
+  echo "Starting feeding safety decision mirror..."
+  safety_contact_arg="--no-mock-contact"
+  if [[ "${MOCK_CONTACT}" == "1" ]]; then
+    safety_contact_arg="--mock-contact"
+  fi
+  "${PYTHON_BIN}" -m raspberry_pi.safety_control.safety_controller \
+    --input-mode "${SAFETY_INPUT_MODE}" \
+    --camera-log-file "${LOG_DIR}/camera_ai_log.csv" \
+    --output "${LOG_DIR}/feeding_decision_log.csv" \
+    "${safety_contact_arg}" \
+    --mock-impedance-kohm "${MOCK_IMPEDANCE_KOHM}" \
+    --honey-amount-percent "${HONEY_AMOUNT_PERCENT}" \
+    >> "${LOG_DIR}/safety_control.status.log" 2>&1 &
+  child_pids+=("$!")
+fi
+
 if [[ "${RUN_SERIAL_LOGGER}" == "1" ]]; then
   echo "Starting serial logger on ${SERIAL_PORT}..."
   "${PYTHON_BIN}" raspberry_pi/logger/serial_logger.py \
@@ -63,6 +85,7 @@ if [[ "${RUN_DASHBOARD}" == "1" ]]; then
   echo "Starting dashboard on http://${DASHBOARD_HOST}:${DASHBOARD_PORT}"
   "${PYTHON_BIN}" raspberry_pi/dashboard/app.py \
     --log-dir "${LOG_DIR}" \
+    --log-file "${LOG_DIR}/feeding_decision_log.csv" \
     --camera-log-file "${LOG_DIR}/camera_ai_log.csv" \
     --debug-frame-dir data/debug_frames \
     --host "${DASHBOARD_HOST}" \

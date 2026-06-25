@@ -589,7 +589,8 @@ python -m pip install -r raspberry_pi/camera_ai/requirements.txt
 python -m pip install -r raspberry_pi/dashboard/requirements.txt
 ```
 
-正常演示启动。这个命令会同时启动 Camera AI 和远程仪表盘：
+正常演示启动。这个命令会同时启动 Camera AI、模拟接触垫安全判断、
+统一CSV日志和远程仪表盘：
 
 ```bash
 ./scripts/run_demo.sh
@@ -601,12 +602,37 @@ python -m pip install -r raspberry_pi/dashboard/requirements.txt
 http://<pi-ip>:8080
 ```
 
-仪表盘会显示 Camera AI 最新识别画面、AI状态和 contact-pad 状态。
+仪表盘会显示 Camera AI 最新识别画面、当前状态、熊检测、置信度、
+接触确认、安全判断、`RELEASE/HOLD` 指令和CSV保存状态。
 Camera AI 写出的图像路径是：
 
 ```text
 data/debug_frames/latest_camera_ai.jpg
 ```
+
+统一判断日志写入：
+
+```text
+data/logs/feeding_decision_log.csv
+```
+
+当前原型使用模拟接触传感器输入。默认值可在启动时修改：
+
+```bash
+MOCK_CONTACT=1 \
+MOCK_IMPEDANCE_KOHM=92.4 \
+HONEY_AMOUNT_PERCENT=80 \
+./scripts/run_demo.sh
+```
+
+如果没有摄像头或只想排练完整状态迁移，可使用全模拟场景：
+
+```bash
+RUN_CAMERA_AI=0 SAFETY_INPUT_MODE=scenario ./scripts/run_demo.sh
+```
+
+Raspberry Pi 上的安全判断是发表和集成确认用的镜像，不直接驱动实际舵机。
+实际 `RELEASE_ON / RELEASE_OFF` 的主安全控制仍由 Arduino Uno Q 承担。
 
 只启动 Camera AI，不启动仪表盘：
 
@@ -643,6 +669,7 @@ python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
 ```bash
 python raspberry_pi/dashboard/app.py \
   --log-dir data/logs \
+  --log-file data/logs/feeding_decision_log.csv \
   --camera-log-file data/logs/camera_ai_log.csv \
   --debug-frame-dir data/debug_frames \
   --host 0.0.0.0 \

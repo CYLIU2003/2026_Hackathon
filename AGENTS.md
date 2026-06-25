@@ -469,3 +469,26 @@ Raspberry Pi 4B:
 ```
 
 This proves the control architecture before real sensors and the physical honeycomb mechanism are integrated.
+
+---
+
+## 16. Development Note Requirement
+
+For every future implementation, configuration, documentation, test, or demo
+script change, update the root-level `DEVELOPMENT_NOTES.md` in the same work
+unit.
+
+Each entry must include:
+
+```text
+- ISO-8601 edit timestamp with timezone
+- purpose
+- changed files
+- what changed
+- safety/interface impact
+- verification and result
+- remaining work
+```
+
+Use Git commit dates for committed history. For uncommitted work, explicitly
+identify timestamps as filesystem/edit timestamps rather than commit dates.

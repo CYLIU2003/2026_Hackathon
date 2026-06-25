@@ -1,0 +1,10 @@
+{
+  "honey_min_threshold_percent": 20,
+  "contact_confirm_duration_ms": 500,
+  "max_release_duration_ms": 3000,
+  "cooldown_after_release_ms": 5000,
+  "camera_data_timeout_ms": 5000,
+  "log_interval_ms": 500,
+  "default_honey_amount_percent": 80,
+  "default_release_state": "RELEASE_OFF"
+}

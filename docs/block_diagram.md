@@ -3,30 +3,41 @@
 This diagram shows the MVP data flow and responsibility split.
 
 ```text
-[Simulated Bear]
+[USB Camera]
     |
     v
-[Front Paw Contact Pad Inputs]  (simulated)
+[YOLO Bear Detection]
+  - confidence
+  - bounding-box area as distance proxy
+  - consecutive detection check
     |
     v
-[Arduino Uno]
-  - simulated inputs
-  - state machine
-  - release decision logic
-  - RELEASE_ON / RELEASE_OFF output
-  - JSON Lines over serial
-    |
-    v
-[Raspberry Pi 4B]
-  - receive JSON Lines
-  - CSV logging
-  - simple dashboard
-    |
-    v
-[Demo / Presentation]
+[Bear Approach Signal] ----------------------+
+                                              |
+[Front Paw Contact Pad]                       |
+  - mock input for MVP                        |
+  - future resistance / serial input          |
+    |                                         |
+    +----------------------+------------------+
+                           v
+              [Safety Decision State Machine]
+                - honey amount
+                - system safe
+                - emergency stop
+                - release timeout
+                - cooldown
+                           |
+               +-----------+-----------+
+               |                       |
+               v                       v
+      [RELEASE_ON/OFF]          [CSV + Dashboard]
+      Arduino authoritative      Raspberry Pi demo mirror
 ```
 
 Notes:
 - Arduino Uno is the **main safety controller**.
-- Raspberry Pi is **logging and visualization only**.
+- Raspberry Pi may mirror the decision for presentation, logging, and
+  integration testing, but it does not directly drive the physical actuator.
 - Default state is always **RELEASE_OFF**.
+- The MVP contact input is simulated and can later be replaced with Arduino
+  serial resistance/contact data.
