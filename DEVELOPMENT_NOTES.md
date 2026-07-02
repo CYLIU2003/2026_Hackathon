@@ -1,6 +1,6 @@
 # 開発ノート / Development Notes
 
-最終更新: 2026-06-25T12:24:44+09:00  
+最終更新: 2026-07-02T15:33:33+09:00
 対象: A1 Bear Honey Buffet / Front Paw Contact Pad Safety Control System  
 タイムゾーン: Asia/Tokyo (UTC+09:00)
 
@@ -504,6 +504,84 @@ USB Camera
 
 - 2026-06-24の給餌判断システム化は未コミットのため、正式コミット後に
   commit hashを追記する。
+
+### 2026-07-02T15:26:27+09:00 — Dashboard Demo Mode追加
+
+根拠: 未コミット差分と編集時刻。Gitコミット日時ではない。
+
+担当: Codex
+
+目的:
+
+- Tailscale経由で開いたRaspberry Piダッシュボードから、USBシリアル接続の
+  Arduinoへ安全なデモ用コマンドを送れるようにする。
+- ArduinoをWi-Fi化せず、Dashboard → Raspberry Pi → USB serial → Arduino
+  の境界を保つ。
+
+変更ファイル:
+
+- `raspberry_pi/dashboard/app.py`
+- `raspberry_pi/dashboard/requirements.txt`
+- `raspberry_pi/dashboard/README.md`
+- `arduino_uno_q/contact_pad_controller/contact_pad_controller.ino`
+- `arduino_uno_q/actuator_standalone/actuator_standalone.ino`
+- `arduino_uno_q/contact_pad_controller/README.md`
+- `docs/interface_spec.md`
+- `docs/GODA_ACTUATOR_INTEGRATION_INSTRUCTIONS_JP.md`
+- `tests/test_dashboard.py`
+- `scripts/run_demo.sh`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- ダッシュボードへ Demo Mode パネル、Enable/Disable、Release/Open、
+  Stop/Close、Test Motion、Emergency Stop、最新コマンド状態表示を追加。
+- Flask APIに `/api/demo-status`、`/api/demo-enable`、`/api/demo-mode`、
+  `/api/demo-command`、個別demo endpointを追加。
+- Raspberry Pi側でUSBシリアル送信を一元化し、`RELEASE`、`STOP`、`TEST`
+  をArduinoへ送るようにした。
+- Arduino未接続、serial port不可、pyserial未導入時は `SIMULATED` として
+  CSVへ記録し、UIは動作継続する。
+- Demo command CSVログを追加し、dashboard requirementsへ `pyserial` を追加。
+- `scripts/run_demo.sh` からDashboard起動時にdemo serial port、baudrate、
+  demo command log fileを渡すようにした。
+- Arduino側にDemo Mode用 `RELEASE`、`STOP`、`TEST` 受信処理を追加。
+  `RELEASE`/`TEST` は `ERROR_SAFE` を解除せず、既存の状態機械とtimeoutを
+  通る。
+- ダッシュボードテストにDemo Mode API、fake serial、simulation fallback、
+  invalid command、demo log除外確認を追加。
+
+安全・インターフェースへの影響:
+
+- デフォルトは `STOP` / closed、Demo Modeは無効。
+- `RELEASE` と `TEST` は手動Enable後のみ送信可能。
+- `STOP` / CloseとEmergency StopはDemo Mode無効時でも `STOP` を送信でき、
+  Emergency StopはDemo Modeを無効化。
+- Raspberry Piはコマンド送信ゲートウェイであり、ArduinoのWi-Fi化や完全無線
+  制御への変更なし。
+- Demo command logはcontact/safety CSVとして誤選択されないよう除外。
+
+検証:
+
+- 2026-07-02T15:33:33+09:00: `python -m py_compile
+  raspberry_pi/dashboard/app.py raspberry_pi/logger/serial_logger.py
+  raspberry_pi/safety_control/safety_controller.py` 成功。
+- 2026-07-02T15:33:33+09:00: `bash -n scripts/run_demo.sh` 成功。
+- 2026-07-02T15:32:07+09:00: `.venv/bin/python -m pytest
+  tests/test_dashboard.py -q` は `12 passed`。
+- 2026-07-02T15:33:33+09:00: `.venv/bin/python -m pytest -q` は
+  `51 passed`。
+
+結果:
+
+- ハードウェア未接続でもDemo ModeのUI、API、CSVログ、simulation fallbackを
+  確認できた。
+- 実Arduino接続時はRaspberry Pi backendだけがUSBシリアルを扱う構成になった。
+
+残課題:
+
+- Raspberry Pi実機で `/dev/ttyACM0` 接続、Tailscale経由アクセス、Arduino実機の
+  `RELEASE` / `STOP` / `TEST` 受信を確認する。
 
 ## 8. 今後追記用テンプレート
 

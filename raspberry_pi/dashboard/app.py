@@ -1,10 +1,46 @@
 import argparse
 import csv
+import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
-from flask import Flask, abort, render_template_string, send_file
+from flask import (
+    Flask,
+    abort,
+    jsonify,
+    redirect,
+    render_template_string,
+    request,
+    send_file,
+    url_for,
+)
+
+
+JST = timezone(timedelta(hours=9))
+
+DEMO_COMMAND_ALIASES = {
+    "RELEASE": ("RELEASE", "RELEASE"),
+    "OPEN": ("RELEASE", "RELEASE"),
+    "STOP": ("STOP", "STOP"),
+    "CLOSE": ("STOP", "STOP"),
+    "TEST": ("TEST", "TEST"),
+    "TEST_MOTION": ("TEST", "TEST"),
+    "EMERGENCY_STOP": ("EMERGENCY_STOP", "STOP"),
+    "ESTOP": ("EMERGENCY_STOP", "STOP"),
+}
+DEMO_COMMANDS_REQUIRING_ENABLE = {"RELEASE", "TEST"}
+DEMO_COMMAND_FIELDNAMES = [
+    "timestamp",
+    "command",
+    "serial_command",
+    "demo_enabled",
+    "serial_status",
+    "result",
+    "message",
+    "emergency_stop",
+]
 
 
 HTML_TEMPLATE = """
@@ -25,6 +61,7 @@ HTML_TEMPLATE = """
         --ok: #0b7a53;
         --warn: #b54708;
         --error: #b42318;
+        --action: #175cd3;
       }
       * { box-sizing: border-box; }
       body {
@@ -96,6 +133,10 @@ HTML_TEMPLATE = """
         grid-column: 1 / -1;
         border-left: 6px solid var(--ok);
       }
+      .demo {
+        grid-column: 1 / -1;
+        border-left: 6px solid var(--action);
+      }
       .decision-grid {
         display: grid;
         grid-template-columns: repeat(3, minmax(150px, 1fr));
@@ -116,9 +157,49 @@ HTML_TEMPLATE = """
         font-weight: 700;
         overflow-wrap: anywhere;
       }
+      .demo-top,
+      .demo-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+      .demo-top {
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+      .demo-controls { margin-bottom: 14px; }
+      .button {
+        min-height: 38px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        padding: 8px 12px;
+        background: #ffffff;
+        color: var(--text);
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .button.primary {
+        background: var(--action);
+        border-color: var(--action);
+        color: #ffffff;
+      }
+      .button.danger {
+        background: var(--error);
+        border-color: var(--error);
+        color: #ffffff;
+      }
+      .button:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+      .demo-status-table th { width: 24%; }
       @media (max-width: 860px) {
         main { grid-template-columns: 1fr; padding: 12px; }
         .decision-grid { grid-template-columns: 1fr 1fr; }
+      }
+      @media (max-width: 520px) {
+        .decision-grid { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -172,6 +253,59 @@ HTML_TEMPLATE = """
         {% else %}
           <p>No integrated safety-decision data found yet. Output remains HOLD.</p>
         {% endif %}
+      </section>
+
+      <section class="demo">
+        <h2>Demo Mode</h2>
+        <div class="demo-top">
+          <div>
+            {% if demo_status.get('demo_enabled') %}
+              <span class="pill ok">ENABLED</span>
+            {% else %}
+              <span class="pill warn">DISABLED</span>
+            {% endif %}
+            <span class="muted">Default command: STOP / closed</span>
+          </div>
+          <form action="{{ url_for('demo_mode') }}" method="post">
+            {% if demo_status.get('demo_enabled') %}
+              <button class="button" type="submit" name="enabled" value="false">Disable Demo Mode</button>
+            {% else %}
+              <button class="button primary" type="submit" name="enabled" value="true">Enable Demo Mode</button>
+            {% endif %}
+          </form>
+        </div>
+
+        <div class="demo-controls">
+          <form action="{{ url_for('demo_command') }}" method="post">
+            <input type="hidden" name="command" value="RELEASE" />
+            <button class="button primary" type="submit" {% if not demo_status.get('demo_enabled') %}disabled{% endif %}>
+              Release / Open
+            </button>
+          </form>
+          <form action="{{ url_for('demo_command') }}" method="post">
+            <input type="hidden" name="command" value="STOP" />
+            <button class="button" type="submit">Stop / Close</button>
+          </form>
+          <form action="{{ url_for('demo_command') }}" method="post">
+            <input type="hidden" name="command" value="TEST" />
+            <button class="button" type="submit" {% if not demo_status.get('demo_enabled') %}disabled{% endif %}>
+              Test Motion
+            </button>
+          </form>
+          <form action="{{ url_for('demo_command') }}" method="post">
+            <input type="hidden" name="command" value="EMERGENCY_STOP" />
+            <button class="button danger" type="submit">Emergency Stop</button>
+          </form>
+        </div>
+
+        <table class="demo-status-table">
+          <tr><th>Last command sent</th><td>{{ demo_status.get('last_command', 'STOP') }}</td></tr>
+          <tr><th>Command timestamp</th><td>{{ demo_status.get('command_timestamp') or '-' }}</td></tr>
+          <tr><th>Serial connection status</th><td>{{ demo_status.get('serial_status', 'NOT_CONNECTED') }}</td></tr>
+          <tr><th>Result</th><td>{{ demo_status.get('result', '-') }}</td></tr>
+          <tr><th>Message</th><td>{{ demo_status.get('message', '-') }}</td></tr>
+        </table>
+        <p class="muted">Demo command log: {{ demo_status.get('log_path', '') }}</p>
       </section>
 
       <section>
@@ -250,6 +384,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--camera-log-file", default="data/logs/camera_ai_log.csv")
     parser.add_argument("--debug-frame-dir", default="data/debug_frames")
     parser.add_argument("--camera-frame-file", default="latest_camera_ai.jpg")
+    parser.add_argument("--demo-serial-port", default="/dev/ttyACM0")
+    parser.add_argument("--demo-baudrate", type=int, default=115200)
+    parser.add_argument("--demo-command-log-file", default="data/logs/demo_commands.csv")
+    parser.add_argument("--demo-serial-timeout", type=float, default=1.0)
+    parser.add_argument("--demo-serial-reset-delay", type=float, default=2.0)
+    parser.add_argument("--demo-force-simulation", action="store_true")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--refresh", type=int, default=1)
@@ -293,6 +433,320 @@ def status_pill(value: object) -> str:
     return f'<span class="pill {css_class}">{label}</span>'
 
 
+def now_jst_iso() -> str:
+    return datetime.now(JST).isoformat(timespec="seconds")
+
+
+def normalize_demo_command(raw_command: object) -> tuple[Optional[str], Optional[str]]:
+    command = str(raw_command or "").strip().upper()
+    return DEMO_COMMAND_ALIASES.get(command, (None, None))
+
+
+def default_serial_client_factory(
+    port: str,
+    baudrate: int,
+    timeout: float,
+    write_timeout: float,
+):
+    import serial  # type: ignore
+
+    if "://" in port:
+        return serial.serial_for_url(
+            port,
+            baudrate=baudrate,
+            timeout=timeout,
+            write_timeout=write_timeout,
+        )
+    return serial.Serial(
+        port=port,
+        baudrate=baudrate,
+        timeout=timeout,
+        write_timeout=write_timeout,
+    )
+
+
+class DemoCommandService:
+    def __init__(
+        self,
+        *,
+        serial_port: str,
+        baudrate: int,
+        command_log_file: Path,
+        serial_timeout: float,
+        serial_reset_delay: float,
+        force_simulation: bool,
+        serial_client_factory: Callable[
+            [str, int, float, float],
+            object,
+        ] = default_serial_client_factory,
+    ) -> None:
+        self.serial_port = serial_port
+        self.baudrate = baudrate
+        self.command_log_file = command_log_file
+        self.serial_timeout = serial_timeout
+        self.serial_reset_delay = serial_reset_delay
+        self.force_simulation = force_simulation
+        self.serial_client_factory = serial_client_factory
+        self.demo_enabled = False
+        self._serial_client: Optional[object] = None
+        self._serial_status = "SIMULATION_MODE" if force_simulation else "NOT_CONNECTED"
+        self._emergency_stop = False
+        self._lock = threading.Lock()
+        self._last_status = {
+            "demo_enabled": False,
+            "last_command": "STOP",
+            "last_command_sent": "STOP",
+            "requested_command": "DEFAULT",
+            "command_timestamp": "",
+            "serial_status": self._serial_status,
+            "serial_connection_status": self._serial_status,
+            "simulation_mode": self._serial_status == "SIMULATION_MODE",
+            "success": True,
+            "result": "DEFAULT_CLOSED",
+            "message": "Default STOP / closed; Demo Mode is disabled.",
+            "emergency_stop": False,
+            "log_path": str(self.command_log_file),
+        }
+
+    def status(self) -> dict:
+        with self._lock:
+            status = dict(self._last_status)
+            status["demo_enabled"] = self.demo_enabled
+            status["serial_status"] = self._serial_status
+            status["serial_connection_status"] = self._serial_status
+            status["simulation_mode"] = self._serial_status == "SIMULATION_MODE"
+            status["success"] = self._result_successful(str(status.get("result", "")))
+            status["emergency_stop"] = self._emergency_stop
+            status["last_command_sent"] = status.get(
+                "last_command",
+                status.get("last_command_sent", "STOP"),
+            )
+            status["log_path"] = str(self.command_log_file)
+            return status
+
+    def set_enabled(self, enabled: bool) -> tuple[dict, int]:
+        with self._lock:
+            if enabled:
+                self.demo_enabled = True
+                self._emergency_stop = False
+                result, message, http_status = self._send_serial_command("STOP")
+                if http_status >= 400:
+                    self.demo_enabled = False
+                mode_message = (
+                    "Demo Mode enabled"
+                    if self.demo_enabled
+                    else "Demo Mode enable failed"
+                )
+                status = self._record_status(
+                    command="STOP",
+                    serial_command="STOP",
+                    result=result,
+                    message=f"{mode_message}; {message}",
+                )
+                return status, http_status
+
+        return self.run_command("STOP", requested_command="DISABLE_DEMO", force=True)
+
+    def run_command(
+        self,
+        raw_command: object,
+        *,
+        requested_command: Optional[str] = None,
+        force: bool = False,
+    ) -> tuple[dict, int]:
+        normalized_command, serial_command = normalize_demo_command(raw_command)
+        command_for_log = requested_command or str(raw_command or "").strip().upper()
+
+        with self._lock:
+            if normalized_command is None or serial_command is None:
+                status = self._record_status(
+                    command=command_for_log or "UNKNOWN",
+                    serial_command="",
+                    result="ERROR",
+                    message="Invalid demo command.",
+                )
+                return status, 400
+
+            if (
+                normalized_command in DEMO_COMMANDS_REQUIRING_ENABLE
+                and not self.demo_enabled
+                and not force
+            ):
+                status = self._record_status(
+                    command=normalized_command,
+                    serial_command="",
+                    result="BLOCKED",
+                    message="Demo Mode is disabled; command was not sent.",
+                )
+                return status, 403
+
+            if normalized_command == "EMERGENCY_STOP":
+                self.demo_enabled = False
+                self._emergency_stop = True
+            else:
+                self._emergency_stop = False
+
+            if requested_command == "DISABLE_DEMO":
+                self.demo_enabled = False
+                self._emergency_stop = False
+
+            result, message, http_status = self._send_serial_command(serial_command)
+            status = self._record_status(
+                command=command_for_log or normalized_command,
+                serial_command=serial_command,
+                result=result,
+                message=message,
+            )
+            return status, http_status
+
+    def _send_serial_command(self, serial_command: str) -> tuple[str, str, int]:
+        if self.force_simulation or not self.serial_port:
+            self._serial_status = "SIMULATION_MODE"
+            return (
+                "SIMULATED",
+                f"Simulation mode: {serial_command} recorded; no hardware command sent.",
+                200,
+            )
+
+        try:
+            serial_client = self._ensure_serial_client()
+            payload = f"{serial_command}\n".encode("utf-8")
+            bytes_written = serial_client.write(payload)
+            serial_client.flush()
+            if isinstance(bytes_written, int) and bytes_written != len(payload):
+                raise TimeoutError(
+                    f"serial write incomplete: {bytes_written} of {len(payload)} bytes"
+                )
+            self._serial_status = "CONNECTED"
+            return (
+                "SENT",
+                f"Sent {serial_command} to Arduino on {self.serial_port}.",
+                200,
+            )
+        except ImportError:
+            self._serial_status = "SIMULATION_MODE"
+            return (
+                "SIMULATED",
+                "pyserial is not installed; command recorded in simulation mode.",
+                200,
+            )
+        except TimeoutError as exc:
+            self._close_serial_client()
+            self._serial_status = "ERROR"
+            return ("ERROR", f"Serial command timeout: {exc}", 504)
+        except Exception as exc:
+            self._close_serial_client()
+            if "Timeout" in type(exc).__name__:
+                self._serial_status = "ERROR"
+                return ("ERROR", f"Serial command timeout: {exc}", 504)
+
+            self._serial_status = "SIMULATION_MODE"
+            return (
+                "SIMULATED",
+                f"Arduino serial unavailable; command recorded in simulation mode: {exc}",
+                200,
+            )
+
+    def _ensure_serial_client(self):
+        if self._serial_client is not None:
+            return self._serial_client
+
+        serial_client = self.serial_client_factory(
+            self.serial_port,
+            self.baudrate,
+            self.serial_timeout,
+            self.serial_timeout,
+        )
+        self._serial_client = serial_client
+        self._serial_status = "CONNECTED"
+        if self.serial_reset_delay > 0:
+            time.sleep(self.serial_reset_delay)
+        return serial_client
+
+    def _close_serial_client(self) -> None:
+        if self._serial_client is None:
+            return
+
+        try:
+            self._serial_client.close()
+        except Exception:
+            pass
+        self._serial_client = None
+
+    def _record_status(
+        self,
+        *,
+        command: str,
+        serial_command: str,
+        result: str,
+        message: str,
+    ) -> dict:
+        timestamp = now_jst_iso()
+        status = {
+            "demo_enabled": self.demo_enabled,
+            "last_command": serial_command or command,
+            "last_command_sent": serial_command or command,
+            "requested_command": command,
+            "command_timestamp": timestamp,
+            "serial_status": self._serial_status,
+            "serial_connection_status": self._serial_status,
+            "simulation_mode": self._serial_status == "SIMULATION_MODE",
+            "success": self._result_successful(result),
+            "result": result,
+            "message": message,
+            "emergency_stop": self._emergency_stop,
+            "log_path": str(self.command_log_file),
+        }
+        self._last_status = status
+        self._append_log_row(status, command, serial_command)
+        return dict(status)
+
+    def _append_log_row(self, status: dict, command: str, serial_command: str) -> None:
+        self.command_log_file.parent.mkdir(parents=True, exist_ok=True)
+        should_write_header = (
+            not self.command_log_file.exists()
+            or self.command_log_file.stat().st_size == 0
+        )
+        with self.command_log_file.open("a", newline="") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=DEMO_COMMAND_FIELDNAMES)
+            if should_write_header:
+                writer.writeheader()
+            writer.writerow(
+                {
+                    "timestamp": status["command_timestamp"],
+                    "command": command,
+                    "serial_command": serial_command,
+                    "demo_enabled": status["demo_enabled"],
+                    "serial_status": status["serial_status"],
+                    "result": status["result"],
+                    "message": status["message"],
+                    "emergency_stop": status["emergency_stop"],
+                }
+            )
+
+    @staticmethod
+    def _result_successful(result: str) -> bool:
+        return result in {"DEFAULT_CLOSED", "READY", "SENT", "SIMULATED"}
+
+
+def should_return_json() -> bool:
+    if request.is_json:
+        return True
+    return (
+        request.accept_mimetypes["application/json"]
+        >= request.accept_mimetypes["text/html"]
+    )
+
+
+def demo_command_from_request() -> object:
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        if truthy(payload.get("emergency_stop")):
+            return "EMERGENCY_STOP"
+        return payload.get("command", "")
+    return request.form.get("command", "")
+
+
 def create_app(
     log_dir: Path,
     log_file: str,
@@ -301,6 +755,17 @@ def create_app(
     camera_log_file: str,
     debug_frame_dir: Path,
     camera_frame_file: str,
+    demo_serial_port: str = "/dev/ttyACM0",
+    demo_baudrate: int = 115200,
+    demo_command_log_file: str = "data/logs/demo_commands.csv",
+    demo_log_file: Optional[str] = None,
+    demo_serial_timeout: float = 1.0,
+    demo_serial_reset_delay: float = 2.0,
+    demo_force_simulation: bool = False,
+    serial_client_factory: Callable[
+        [str, int, float, float],
+        object,
+    ] = default_serial_client_factory,
 ) -> Flask:
     app = Flask(__name__)
     app.jinja_env.globals["status_pill"] = status_pill
@@ -309,6 +774,16 @@ def create_app(
     debug_frame_dir = debug_frame_dir.resolve()
     resolved_log_file = str(Path(log_file).resolve()) if log_file else ""
     resolved_camera_log_file = str(Path(camera_log_file).resolve())
+    resolved_demo_command_log_file = demo_log_file or demo_command_log_file
+    demo_service = DemoCommandService(
+        serial_port=demo_serial_port,
+        baudrate=demo_baudrate,
+        command_log_file=Path(resolved_demo_command_log_file).resolve(),
+        serial_timeout=demo_serial_timeout,
+        serial_reset_delay=demo_serial_reset_delay,
+        force_simulation=demo_force_simulation,
+        serial_client_factory=serial_client_factory,
+    )
 
     @app.route("/")
     def index():
@@ -318,7 +793,10 @@ def create_app(
             if resolved_log_file
             else find_latest_log_file(
                 log_dir,
-                excluded_names={chosen_camera_log.name},
+                excluded_names={
+                    chosen_camera_log.name,
+                    demo_service.command_log_file.name,
+                },
             )
         )
         row = load_latest_row(chosen_log) if chosen_log else None
@@ -334,6 +812,7 @@ def create_app(
             camera_frame_available=camera_frame_path.exists(),
             cache_buster=time.time_ns(),
             refresh_interval=refresh_interval,
+            demo_status=demo_service.status(),
         )
 
     @app.route("/camera/latest.jpg")
@@ -354,6 +833,61 @@ def create_app(
         response.headers["Expires"] = "0"
         return response
 
+    @app.route("/api/demo-status")
+    @app.route("/api/demo/status")
+    def demo_status():
+        return jsonify(demo_service.status())
+
+    @app.route("/api/demo-enable", methods=["POST"])
+    @app.route("/api/demo-mode", methods=["POST"])
+    def demo_mode():
+        if request.is_json:
+            payload = request.get_json(silent=True) or {}
+            enabled = truthy(payload.get("enabled"))
+        else:
+            enabled = truthy(request.form.get("enabled"))
+
+        status, http_status = demo_service.set_enabled(enabled)
+        if should_return_json():
+            return jsonify(status), http_status
+        return redirect(url_for("index"), code=303)
+
+    @app.route("/api/demo-command", methods=["POST"])
+    def demo_command():
+        command = demo_command_from_request()
+        status, http_status = demo_service.run_command(command)
+        if should_return_json():
+            return jsonify(status), http_status
+        return redirect(url_for("index"), code=303)
+
+    @app.route("/api/demo/release", methods=["POST"])
+    def demo_release():
+        status, http_status = demo_service.run_command("RELEASE")
+        if should_return_json():
+            return jsonify(status), http_status
+        return redirect(url_for("index"), code=303)
+
+    @app.route("/api/demo/stop", methods=["POST"])
+    def demo_stop():
+        status, http_status = demo_service.run_command("STOP")
+        if should_return_json():
+            return jsonify(status), http_status
+        return redirect(url_for("index"), code=303)
+
+    @app.route("/api/demo/test", methods=["POST"])
+    def demo_test():
+        status, http_status = demo_service.run_command("TEST")
+        if should_return_json():
+            return jsonify(status), http_status
+        return redirect(url_for("index"), code=303)
+
+    @app.route("/api/demo/emergency-stop", methods=["POST"])
+    def demo_emergency_stop():
+        status, http_status = demo_service.run_command("EMERGENCY_STOP")
+        if should_return_json():
+            return jsonify(status), http_status
+        return redirect(url_for("index"), code=303)
+
     return app
 
 
@@ -367,6 +901,12 @@ def main() -> int:
         camera_log_file=args.camera_log_file,
         debug_frame_dir=Path(args.debug_frame_dir),
         camera_frame_file=args.camera_frame_file,
+        demo_serial_port=args.demo_serial_port,
+        demo_baudrate=args.demo_baudrate,
+        demo_command_log_file=args.demo_command_log_file,
+        demo_serial_timeout=args.demo_serial_timeout,
+        demo_serial_reset_delay=args.demo_serial_reset_delay,
+        demo_force_simulation=args.demo_force_simulation,
     )
     app.run(host=args.host, port=args.port)
     return 0

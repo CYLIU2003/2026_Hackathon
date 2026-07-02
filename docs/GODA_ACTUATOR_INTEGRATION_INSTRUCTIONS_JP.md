@@ -260,6 +260,9 @@ python3 raspberry_pi/integration/fake_bear_to_actuator.py --no-serial --loop
 
 | コマンド | 意味 |
 |---|---|
+| `RELEASE` | Raspberry Pi ダッシュボード Demo Mode からの開動作要求 |
+| `STOP` | Raspberry Pi ダッシュボード Demo Mode からの閉動作要求 |
+| `TEST` | Raspberry Pi ダッシュボード Demo Mode からのテスト動作要求 |
 | `RESET` | ERROR_SAFEから復帰 |
 | `TEST_AUTO_ON` | Arduino内部の自動シミュレーションをON |
 | `TEST_AUTO_OFF` | Arduino内部の自動シミュレーションをOFF |
@@ -276,6 +279,8 @@ python3 raspberry_pi/integration/fake_bear_to_actuator.py --no-serial --loop
 
 重要: `SET AI_BEAR 1` だけではサーボは動かない。  
 `SET PAW 1`, `SET HONEY 80`, `SET SAFE 1`, `SET ESTOP 0` も満たしたときだけ `RELEASING` に入る。
+`RELEASE` と `TEST` はデモ用の模擬入力ショートカットであり、`ERROR_SAFE`
+を解除しない。エラー復帰は `RESET` だけで行う。
 
 ---
 

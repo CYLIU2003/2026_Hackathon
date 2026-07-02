@@ -25,10 +25,48 @@ python raspberry_pi/dashboard/app.py \
 
 Open `http://<pi-ip>:8080`.
 
+For remote operation, open the same dashboard through the Raspberry Pi Tailscale
+address. The Arduino remains connected to the Raspberry Pi by wired USB serial;
+the dashboard does not assume the Arduino has Wi-Fi.
+
 The camera image appears after Camera AI writes:
 
 ```text
 data/debug_frames/latest_camera_ai.jpg
+```
+
+## Demo Mode
+
+The dashboard includes a manual Demo Mode panel for presentation use.
+
+- Default state is `STOP` / closed.
+- Demo Mode must be enabled before `Release / Open` or `Test Motion` commands
+  are accepted.
+- `Stop / Close` and `Emergency Stop` are always available and send `STOP`.
+- The Raspberry Pi backend sends only simple USB serial command strings to the
+  Arduino: `RELEASE`, `STOP`, and `TEST`.
+- If the Arduino serial port is unavailable, the same UI runs in simulation
+  mode and logs the command without controlling hardware.
+
+Command log:
+
+```text
+data/logs/demo_commands.csv
+```
+
+Useful hardware run options:
+
+```bash
+python raspberry_pi/dashboard/app.py \
+  --demo-serial-port /dev/ttyACM0 \
+  --demo-baudrate 115200 \
+  --demo-command-log-file data/logs/demo_commands.csv
+```
+
+Hardware-free rehearsal:
+
+```bash
+python raspberry_pi/dashboard/app.py --demo-force-simulation
 ```
 
 ## Run Camera AI + Dashboard

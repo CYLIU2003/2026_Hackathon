@@ -88,6 +88,9 @@ if [[ "${RUN_DASHBOARD}" == "1" ]]; then
     --log-file "${LOG_DIR}/feeding_decision_log.csv" \
     --camera-log-file "${LOG_DIR}/camera_ai_log.csv" \
     --debug-frame-dir data/debug_frames \
+    --demo-serial-port "${SERIAL_PORT}" \
+    --demo-baudrate "${BAUDRATE}" \
+    --demo-command-log-file "${LOG_DIR}/demo_commands.csv" \
     --host "${DASHBOARD_HOST}" \
     --port "${DASHBOARD_PORT}" &
   child_pids+=("$!")

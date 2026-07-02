@@ -43,6 +43,7 @@ bool honey_enough = true;
 bool release_allowed = false;
 bool reset_requested = false;
 bool auto_test_mode = true;
+bool demo_command_active = false;
 
 int simulation_step = 0;
 unsigned long simulation_step_started_at_ms = 0;
@@ -156,6 +157,7 @@ void clear_serial_command_buffer() {
 
 void set_manual_input(const char *key, int value) {
   auto_test_mode = false;
+  demo_command_active = false;
 
   if (strcmp(key, "AI_BEAR") == 0 || strcmp(key, "BEAR") == 0) {
     simulated_bear_detected = value != 0;
@@ -178,9 +180,67 @@ void set_manual_input(const char *key, int value) {
   }
 }
 
+void request_demo_release(const char *next_event) {
+  auto_test_mode = false;
+
+  if (state == ERROR_SAFE) {
+    demo_command_active = false;
+    event_name = "DEMO_RELEASE_BLOCKED_ERROR_SAFE";
+    return;
+  }
+
+  demo_command_active = true;
+  emergency_stop = false;
+  simulated_bear_detected = true;
+  simulated_paw_contact = true;
+  simulated_honey_amount_percent = DEFAULT_HONEY_AMOUNT_PERCENT;
+  if (simulated_honey_amount_percent < HONEY_MIN_THRESHOLD_PERCENT) {
+    simulated_honey_amount_percent = HONEY_MIN_THRESHOLD_PERCENT;
+  }
+  simulated_system_safe = true;
+  last_contact_time_ms = 0;
+  contact_confirmed = false;
+  event_name = next_event;
+}
+
+void stop_demo_release(const char *next_event) {
+  auto_test_mode = false;
+  demo_command_active = false;
+  simulated_bear_detected = false;
+  simulated_paw_contact = false;
+  simulated_honey_amount_percent = DEFAULT_HONEY_AMOUNT_PERCENT;
+  simulated_system_safe = true;
+  emergency_stop = false;
+  contact_confirmed = false;
+  last_contact_time_ms = 0;
+  event_name = next_event;
+  close_release_gate();
+
+  if (state == RELEASING) {
+    enter_state(COOLDOWN, next_event);
+  } else if (state != ERROR_SAFE) {
+    enter_state(IDLE, next_event);
+  }
+}
+
 void handle_serial_command(char *command) {
   while (*command == ' ') {
     command++;
+  }
+
+  if (strcmp(command, "RELEASE") == 0) {
+    request_demo_release("DEMO_RELEASE_COMMAND");
+    return;
+  }
+
+  if (strcmp(command, "STOP") == 0) {
+    stop_demo_release("DEMO_STOP_COMMAND");
+    return;
+  }
+
+  if (strcmp(command, "TEST") == 0) {
+    request_demo_release("DEMO_TEST_COMMAND");
+    return;
   }
 
   if (strcmp(command, "RESET") == 0) {
@@ -197,6 +257,7 @@ void handle_serial_command(char *command) {
 
   if (strcmp(command, "TEST_AUTO_ON") == 0) {
     auto_test_mode = true;
+    demo_command_active = false;
     simulation_step = 0;
     simulation_step_started_at_ms = current_time_ms;
     event_name = "TEST_AUTO_ON";
@@ -205,6 +266,7 @@ void handle_serial_command(char *command) {
 
   if (strcmp(command, "TEST_AUTO_OFF") == 0) {
     auto_test_mode = false;
+    demo_command_active = false;
     simulated_bear_detected = false;
     simulated_paw_contact = false;
     simulated_honey_amount_percent = DEFAULT_HONEY_AMOUNT_PERCENT;
@@ -373,6 +435,7 @@ void process_state_machine() {
   }
 
   if (emergency_stop) {
+    demo_command_active = false;
     close_release_gate();
     set_error("ERR_EMERGENCY_STOP", "emergency_stop active");
     enter_state(ERROR_SAFE, "EMERGENCY_STOP");
@@ -380,6 +443,7 @@ void process_state_machine() {
   }
 
   if (!inputs_valid()) {
+    demo_command_active = false;
     close_release_gate();
     enter_state(ERROR_SAFE, "INVALID_INPUT");
     return;
@@ -428,10 +492,19 @@ void process_state_machine() {
       break;
     case RELEASING:
       if (!release_allowed) {
+        demo_command_active = false;
         enter_state(COOLDOWN, "RELEASE_ABORTED");
       } else if (!system_safe || !bear_detected || !paw_contact || !honey_enough) {
+        demo_command_active = false;
         enter_state(COOLDOWN, "RELEASE_ABORTED");
       } else if (current_time_ms - release_started_at_ms >= MAX_RELEASE_DURATION_MS) {
+        if (demo_command_active) {
+          simulated_bear_detected = false;
+          simulated_paw_contact = false;
+          contact_confirmed = false;
+          last_contact_time_ms = 0;
+          demo_command_active = false;
+        }
         enter_state(COOLDOWN, "RELEASE_TIMEOUT");
       }
       break;

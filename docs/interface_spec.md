@@ -93,3 +93,51 @@ RELEASE_OFF      -> servo_command=HOLD
 
 On missing/stale Camera AI data, invalid values, emergency stop, or an
 exception, the mirror must show `ERROR_SAFE`, `RELEASE_OFF`, and `HOLD`.
+
+---
+
+## Dashboard Demo Mode API
+
+The remote browser reaches the Raspberry Pi dashboard over SSH/Tailscale. The
+Raspberry Pi remains the only networked endpoint for Demo Mode, and the Arduino
+remains connected by wired USB serial.
+
+HTTP endpoints:
+
+```text
+GET  /api/demo-status
+GET  /api/demo/status
+POST /api/demo-enable       {"enabled":true|false}
+POST /api/demo-mode         {"enabled":true|false}
+POST /api/demo-command      {"command":"RELEASE|STOP|TEST"}
+POST /api/demo-command      {"command":"STOP","emergency_stop":true}
+POST /api/demo/release
+POST /api/demo/stop
+POST /api/demo/test
+POST /api/demo/emergency-stop
+```
+
+Arduino USB serial command strings:
+
+```text
+RELEASE
+STOP
+TEST
+```
+
+Safety rules:
+
+- Default dashboard command state is `STOP` / closed.
+- `Release / Open` and `Test Motion` require Demo Mode to be manually enabled
+  first.
+- `Stop / Close` and `Emergency Stop` are always allowed and send `STOP`.
+- If USB serial is unavailable, the dashboard records `SIMULATED` and does not
+  control hardware.
+- `RELEASE` and `TEST` do not clear Arduino `ERROR_SAFE`; only `RESET` clears
+  the error latch.
+
+Demo command CSV:
+
+```csv
+timestamp,command,serial_command,demo_enabled,serial_status,result,message,emergency_stop
+```
