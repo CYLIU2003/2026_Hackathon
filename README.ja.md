@@ -690,6 +690,149 @@ DASHBOARD_PORT=18080 ./scripts/run_demo.sh
 
 ---
 
+## デモモード（遠隔アクチュエータ制御）
+
+ダッシュボードには、プレゼンテーション時に安全に遠隔操作するための
+**デモモード** パネルが組み込まれている。Raspberry Pi 経由で
+Arduino 接続のサーボ/機構に手動コマンドを送信できる。
+
+### アーキテクチャ
+
+```text
+Dashboard (ブラウザ)
+  ↓ Tailscale / LAN
+Raspberry Pi 4B (ダッシュボードバックエンド)
+  ↓ USBシリアル (有線)
+Arduino Uno Q
+  ↓ GPIO / PCA9685
+サーボ / 蜂蜜放出機構
+```
+
+- 無線/遠隔部分は Dashboard → Raspberry Pi 間 **のみ**（Tailscale または LAN 経由）。
+- Raspberry Pi → Arduino 間は安定性のため **有線USBシリアル** のまま。
+- ダッシュボードが直接 Arduino と通信することはない。
+
+### クイックスタート
+
+フルデモ（Camera AI + 安全制御 + ダッシュボード）を起動:
+
+```bash
+./scripts/run_demo.sh
+```
+
+ハードウェアテスト用にダッシュボード単体をデモモード付きで起動:
+
+```bash
+python raspberry_pi/dashboard/app.py \
+  --log-dir data/logs \
+  --log-file data/logs/feeding_decision_log.csv \
+  --camera-log-file data/logs/camera_ai_log.csv \
+  --debug-frame-dir data/debug_frames \
+  --demo-serial-port /dev/ttyACM0 \
+  --demo-baudrate 115200 \
+  --demo-command-log-file data/logs/demo_commands.csv \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+同じ Tailscale ネットワーク上のブラウザから `http://<pi-ip>:8080` を開く。
+
+### 使い方
+
+1. ダッシュボードを開く。デモモードパネルはデフォルトで **DISABLED** と表示される。
+2. **Enable Demo Mode** をクリックして手動操作を有効にする。
+3. 操作ボタンを使う:
+   - **Release / Open** — Arduino に `RELEASE` を送信（デモモード有効時のみ）
+   - **Stop / Close** — Arduino に `STOP` を送信（常に使用可能）
+   - **Test Motion** — Arduino に `TEST` を送信（デモモード有効時のみ）
+   - **Emergency Stop** — 即座に `STOP` を送信し、デモモードを無効化、操作をロック
+4. ステータステーブルに以下が表示される:
+   - 最後に送信したコマンド
+   - コマンド送信時刻
+   - シリアル接続状態（`CONNECTED` / `SIMULATION_MODE` / `ERROR`）
+   - 結果（`SENT` / `SIMULATED` / `BLOCKED` / `ERROR`）
+   - メッセージ
+
+### 安全動作
+
+- デフォルト状態は **STOP / 閉**。
+- `Release` または `Test` コマンドを送信するには、事前にデモモードを手動で有効にする必要がある。
+- `Stop / Close` と `Emergency Stop` は **常に** 使用可能。
+- Emergency Stop は即座に `STOP` を送信し、デモモードを無効化する。
+- シリアル通信エラー時は、ハードウェアを制御せず **シミュレーションモード** に自動フォールバックする。
+
+### シミュレーションモード（ハードウェア無しのリハーサル）
+
+Arduino が接続されていない、またはシリアルポートが利用できない場合、
+ダッシュボードは自動的にシミュレーションモードで動作する:
+
+```bash
+# 自動フォールバック — Arduino 非接続のまま実行
+python raspberry_pi/dashboard/app.py --host 0.0.0.0 --port 8080
+
+# 明示的にシミュレーションモードを強制
+python raspberry_pi/dashboard/app.py --demo-force-simulation --host 0.0.0.0 --port 8080
+```
+
+シミュレーションモードでは:
+- UI 上のすべてのボタンが通常通り動作する。
+- コマンドは `data/logs/demo_commands.csv` に記録される。
+- ハードウェアへのシリアルデータ送信は行わない。
+- ステータスに `SIMULATION_MODE` と表示される。
+
+### API エンドポイント
+
+ダッシュボードバックエンドは、デモモード用に以下の REST エンドポイントを提供する:
+
+| エンドポイント | メソッド | 説明 |
+|---|---|---|
+| `/api/demo-mode` | POST | デモモードの有効/無効 (`{"enabled": true/false}`) |
+| `/api/demo-command` | POST | 汎用コマンド送信 (`{"command": "RELEASE"}`) |
+| `/api/demo/release` | POST | RELEASE コマンド送信 |
+| `/api/demo/stop` | POST | STOP コマンド送信 |
+| `/api/demo/test` | POST | TEST コマンド送信 |
+| `/api/demo/emergency-stop` | POST | EMERGENCY_STOP コマンド送信 |
+| `/api/demo-status` | GET | 現在のデモステータス取得 |
+
+すべてのエンドポイントは `Accept: application/json` または
+`Content-Type: application/json` で呼び出された場合に JSON を返す。
+ブラウザUIからは HTML form POST で送信し、ダッシュボードにリダイレクトする。
+
+### シリアルコマンド
+
+Raspberry Pi は USB シリアル経由で以下の単純な文字列コマンドを Arduino に送信する:
+
+| コマンド | シリアル文字列 | 説明 |
+|---|---|---|
+| Release / Open | `RELEASE\n` | 蜂蜜放出機構を作動 |
+| Stop / Close | `STOP\n` | 機構を停止（安全デフォルト） |
+| Test Motion | `TEST\n` | 短いテスト動作を実行 |
+| Emergency Stop | `STOP\n` | STOP と同じ、デモモードも無効化 |
+
+### コマンドログ
+
+すべてのデモコマンドは CSV に記録される:
+
+```text
+data/logs/demo_commands.csv
+```
+
+CSVカラム: `timestamp`, `command`, `serial_command`, `demo_enabled`,
+`serial_status`, `result`, `message`, `emergency_stop`
+
+### CLI オプション
+
+| オプション | デフォルト | 説明 |
+|---|---|---|
+| `--demo-serial-port` | `/dev/ttyACM0` | Arduino接続のシリアルポート |
+| `--demo-baudrate` | `115200` | シリアル通信ボーレート |
+| `--demo-command-log-file` | `data/logs/demo_commands.csv` | デモコマンドCSVログのパス |
+| `--demo-serial-timeout` | `1.0` | シリアル書き込みタイムアウト（秒） |
+| `--demo-serial-reset-delay` | `2.0` | シリアルポートオープン後の待機時間（秒） |
+| `--demo-force-simulation` | (off) | シリアルポートが存在してもシミュレーションモードを強制 |
+
+---
+
 ## データ形式メモ
 
 - Arduino Uno は **JSON Lines** を送信する。

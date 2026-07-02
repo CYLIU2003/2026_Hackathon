@@ -679,6 +679,149 @@ DASHBOARD_PORT=18080 ./scripts/run_demo.sh
 
 ---
 
+## 데모 모드 (원격 액추에이터 제어)
+
+대시보드에는 프레젠테이션 시 안전한 원격 제어를 위한 **데모 모드** 패널이
+내장되어 있다. Raspberry Pi를 통해 Arduino에 연결된 서보/메커니즘에
+수동으로 명령을 보낼 수 있다.
+
+### 아키텍처
+
+```text
+Dashboard (브라우저)
+  ↓ Tailscale / LAN
+Raspberry Pi 4B (대시보드 백엔드)
+  ↓ USB 시리얼 (유선)
+Arduino Uno Q
+  ↓ GPIO / PCA9685
+서보 / 꿀 방출 메커니즘
+```
+
+- 무선/원격 구간은 Dashboard → Raspberry Pi 사이**만** 해당 (Tailscale 또는 LAN 경유).
+- Raspberry Pi → Arduino 구간은 안정성을 위해 **유선 USB 시리얼** 로 유지.
+- 대시보드가 직접 Arduino와 통신하지 않는다.
+
+### 빠른 시작
+
+전체 데모 실행 (Camera AI + 안전 제어 + 대시보드):
+
+```bash
+./scripts/run_demo.sh
+```
+
+하드웨어 테스트용으로 대시보드만 데모 모드와 함께 실행:
+
+```bash
+python raspberry_pi/dashboard/app.py \
+  --log-dir data/logs \
+  --log-file data/logs/feeding_decision_log.csv \
+  --camera-log-file data/logs/camera_ai_log.csv \
+  --debug-frame-dir data/debug_frames \
+  --demo-serial-port /dev/ttyACM0 \
+  --demo-baudrate 115200 \
+  --demo-command-log-file data/logs/demo_commands.csv \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+같은 Tailscale 네트워크의 브라우저에서 `http://<pi-ip>:8080` 열기.
+
+### 사용법
+
+1. 대시보드를 연다. 데모 모드 패널은 기본적으로 **DISABLED** 로 표시된다.
+2. **Enable Demo Mode** 를 클릭하여 수동 제어를 활성화한다.
+3. 제어 버튼 사용:
+   - **Release / Open** — Arduino에 `RELEASE` 전송 (데모 모드 활성화 필요)
+   - **Stop / Close** — Arduino에 `STOP` 전송 (항상 사용 가능)
+   - **Test Motion** — Arduino에 `TEST` 전송 (데모 모드 활성화 필요)
+   - **Emergency Stop** — 즉시 `STOP` 전송, 데모 모드 비활성화 및 제어 잠금
+4. 상태 테이블에 표시되는 항목:
+   - 마지막으로 보낸 명령
+   - 명령 타임스탬프
+   - 시리얼 연결 상태 (`CONNECTED` / `SIMULATION_MODE` / `ERROR`)
+   - 결과 (`SENT` / `SIMULATED` / `BLOCKED` / `ERROR`)
+   - 메시지
+
+### 안전 동작
+
+- 기본 상태는 **STOP / 닫힘**.
+- `Release` 또는 `Test` 명령을 보내려면 먼저 데모 모드를 수동으로 활성화해야 한다.
+- `Stop / Close` 와 `Emergency Stop` 은 **항상** 사용 가능.
+- Emergency Stop 은 즉시 `STOP` 을 보내고 데모 모드를 비활성화한다.
+- 시리얼 오류 시 하드웨어를 제어하지 않고 **시뮬레이션 모드** 로 자동 전환된다.
+
+### 시뮬레이션 모드 (하드웨어 없는 리허설)
+
+Arduino가 연결되지 않았거나 시리얼 포트를 사용할 수 없는 경우,
+대시보드는 자동으로 시뮬레이션 모드로 실행된다:
+
+```bash
+# 자동 전환 — Arduino 없이 그냥 실행
+python raspberry_pi/dashboard/app.py --host 0.0.0.0 --port 8080
+
+# 또는 명시적으로 시뮬레이션 모드 강제
+python raspberry_pi/dashboard/app.py --demo-force-simulation --host 0.0.0.0 --port 8080
+```
+
+시뮬레이션 모드에서는:
+- UI의 모든 버튼이 정상적으로 작동한다.
+- 명령이 `data/logs/demo_commands.csv` 에 기록된다.
+- 하드웨어로 시리얼 데이터가 전송되지 않는다.
+- 상태에 `SIMULATION_MODE` 가 표시된다.
+
+### API 엔드포인트
+
+대시보드 백엔드는 데모 모드용으로 다음 REST 엔드포인트를 제공한다:
+
+| 엔드포인트 | 메서드 | 설명 |
+|---|---|---|
+| `/api/demo-mode` | POST | 데모 모드 활성화/비활성화 (`{"enabled": true/false}`) |
+| `/api/demo-command` | POST | 범용 명령 전송 (`{"command": "RELEASE"}`) |
+| `/api/demo/release` | POST | RELEASE 명령 전송 |
+| `/api/demo/stop` | POST | STOP 명령 전송 |
+| `/api/demo/test` | POST | TEST 명령 전송 |
+| `/api/demo/emergency-stop` | POST | EMERGENCY_STOP 명령 전송 |
+| `/api/demo-status` | GET | 현재 데모 상태 조회 |
+
+모든 엔드포인트는 `Accept: application/json` 또는
+`Content-Type: application/json` 으로 호출 시 JSON을 반환한다.
+브라우저 UI에서는 HTML form POST를 사용하며 대시보드로 리디렉션된다.
+
+### 시리얼 명령
+
+Raspberry Pi는 USB 시리얼을 통해 다음의 간단한 문자열 명령을 Arduino에 보낸다:
+
+| 명령 | 시리얼 문자열 | 설명 |
+|---|---|---|
+| Release / Open | `RELEASE\n` | 꿀 방출 메커니즘 작동 |
+| Stop / Close | `STOP\n` | 메커니즘 정지 (안전 기본값) |
+| Test Motion | `TEST\n` | 짧은 테스트 동작 실행 |
+| Emergency Stop | `STOP\n` | STOP과 동일, 데모 모드도 비활성화 |
+
+### 명령 로그
+
+모든 데모 명령은 CSV에 기록된다:
+
+```text
+data/logs/demo_commands.csv
+```
+
+CSV 컬럼: `timestamp`, `command`, `serial_command`, `demo_enabled`,
+`serial_status`, `result`, `message`, `emergency_stop`
+
+### CLI 옵션
+
+| 옵션 | 기본값 | 설명 |
+|---|---|---|
+| `--demo-serial-port` | `/dev/ttyACM0` | Arduino 연결 시리얼 포트 |
+| `--demo-baudrate` | `115200` | 시리얼 통신 속도 |
+| `--demo-command-log-file` | `data/logs/demo_commands.csv` | 데모 명령 CSV 로그 경로 |
+| `--demo-serial-timeout` | `1.0` | 시리얼 쓰기 타임아웃 (초) |
+| `--demo-serial-reset-delay` | `2.0` | 시리얼 포트 열기 후 대기 시간 (초) |
+| `--demo-force-simulation` | (off) | 시리얼 포트가 있어도 시뮬레이션 모드 강제 |
+
+---
+
 ## 데이터 형식 메모
 
 - Arduino Uno Q 는 **JSON Lines** 를 전송한다.

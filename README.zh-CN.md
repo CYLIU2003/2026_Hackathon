@@ -706,6 +706,146 @@ DASHBOARD_PORT=18080 ./scripts/run_demo.sh
 
 ---
 
+## 演示模式（远程执行器控制）
+
+仪表盘内置了 **演示模式** 面板，用于在发表时安全地进行远程执行器控制。
+操作者可以通过 Raspberry Pi 向 Arduino 连接的舵机/机构手动发送命令。
+
+### 架构
+
+```text
+Dashboard (浏览器)
+  ↓ Tailscale / LAN
+Raspberry Pi 4B (仪表盘后端)
+  ↓ USB串口 (有线)
+Arduino Uno Q
+  ↓ GPIO / PCA9685
+舵机 / 蜂蜜释放机构
+```
+
+- 无线/远程部分 **仅限** Dashboard → Raspberry Pi（通过 Tailscale 或 LAN）。
+- Raspberry Pi → Arduino 之间保持 **有线USB串口** 以确保稳定性。
+- 仪表盘绝不直接与 Arduino 通信。
+
+### 快速开始
+
+启动完整演示（Camera AI + 安全控制 + 仪表盘）:
+
+```bash
+./scripts/run_demo.sh
+```
+
+或仅启动仪表盘并开启演示模式以进行硬件测试:
+
+```bash
+python raspberry_pi/dashboard/app.py \
+  --log-dir data/logs \
+  --log-file data/logs/feeding_decision_log.csv \
+  --camera-log-file data/logs/camera_ai_log.csv \
+  --debug-frame-dir data/debug_frames \
+  --demo-serial-port /dev/ttyACM0 \
+  --demo-baudrate 115200 \
+  --demo-command-log-file data/logs/demo_commands.csv \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+在同一 Tailscale 网络上的任意浏览器中打开 `http://<pi-ip>:8080`。
+
+### 使用方法
+
+1. 打开仪表盘。演示模式面板默认显示 **DISABLED**。
+2. 点击 **Enable Demo Mode** 启用手动控制。
+3. 使用控制按钮:
+   - **Release / Open** — 向 Arduino 发送 `RELEASE`（需先启用演示模式）
+   - **Stop / Close** — 向 Arduino 发送 `STOP`（始终可用）
+   - **Test Motion** — 向 Arduino 发送 `TEST`（需先启用演示模式）
+   - **Emergency Stop** — 立即发送 `STOP`，禁用演示模式并锁定控制
+4. 状态表显示:
+   - 最后发送的命令
+   - 命令时间戳
+   - 串口连接状态（`CONNECTED` / `SIMULATION_MODE` / `ERROR`）
+   - 结果（`SENT` / `SIMULATED` / `BLOCKED` / `ERROR`）
+   - 消息
+
+### 安全行为
+
+- 默认状态为 **STOP / 关闭**。
+- 发送 `Release` 或 `Test` 命令前，必须手动启用演示模式。
+- `Stop / Close` 和 `Emergency Stop` **始终** 可用。
+- Emergency Stop 立即发送 `STOP` 并禁用演示模式。
+- 串口错误时，系统自动回退到 **仿真模式**，不控制硬件。
+
+### 仿真模式（无硬件排练）
+
+如果 Arduino 未连接或串口不可用，仪表盘自动以仿真模式运行:
+
+```bash
+# 自动回退 — 不连接 Arduino 直接运行
+python raspberry_pi/dashboard/app.py --host 0.0.0.0 --port 8080
+
+# 或显式强制仿真模式
+python raspberry_pi/dashboard/app.py --demo-force-simulation --host 0.0.0.0 --port 8080
+```
+
+在仿真模式下:
+- UI 中所有按钮正常工作。
+- 命令记录到 `data/logs/demo_commands.csv`。
+- 不向硬件发送串口数据。
+- 状态显示 `SIMULATION_MODE`。
+
+### API 端点
+
+仪表盘后端提供以下演示模式 REST 端点:
+
+| 端点 | 方法 | 说明 |
+|---|---|---|
+| `/api/demo-mode` | POST | 启用/禁用演示模式 (`{"enabled": true/false}`) |
+| `/api/demo-command` | POST | 发送通用命令 (`{"command": "RELEASE"}`) |
+| `/api/demo/release` | POST | 发送 RELEASE 命令 |
+| `/api/demo/stop` | POST | 发送 STOP 命令 |
+| `/api/demo/test` | POST | 发送 TEST 命令 |
+| `/api/demo/emergency-stop` | POST | 发送 EMERGENCY_STOP 命令 |
+| `/api/demo-status` | GET | 获取当前演示状态 |
+
+所有端点在使用 `Accept: application/json` 或 `Content-Type: application/json`
+调用时返回 JSON。从浏览器 UI 操作时，使用 HTML form POST 并重定向回仪表盘。
+
+### 串口命令
+
+Raspberry Pi 通过 USB 串口向 Arduino 发送以下简单字符串命令:
+
+| 命令 | 串口字符串 | 说明 |
+|---|---|---|
+| Release / Open | `RELEASE\n` | 启动蜂蜜释放机构 |
+| Stop / Close | `STOP\n` | 停止机构（安全默认） |
+| Test Motion | `TEST\n` | 执行短测试动作 |
+| Emergency Stop | `STOP\n` | 与 STOP 相同，同时禁用演示模式 |
+
+### 命令日志
+
+所有演示命令记录到 CSV:
+
+```text
+data/logs/demo_commands.csv
+```
+
+CSV列: `timestamp`, `command`, `serial_command`, `demo_enabled`,
+`serial_status`, `result`, `message`, `emergency_stop`
+
+### CLI 选项
+
+| 选项 | 默认值 | 说明 |
+|---|---|---|
+| `--demo-serial-port` | `/dev/ttyACM0` | Arduino 连接的串口 |
+| `--demo-baudrate` | `115200` | 串口波特率 |
+| `--demo-command-log-file` | `data/logs/demo_commands.csv` | 演示命令 CSV 日志路径 |
+| `--demo-serial-timeout` | `1.0` | 串口写入超时（秒） |
+| `--demo-serial-reset-delay` | `2.0` | 打开串口后等待时间（秒） |
+| `--demo-force-simulation` | (off) | 即使串口存在也强制仿真模式 |
+
+---
+
 ## 数据格式说明
 
 - Arduino Uno Q 发送 **JSON Lines**。

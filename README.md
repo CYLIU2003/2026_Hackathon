@@ -712,6 +712,149 @@ Bring-up check already verified on the target Raspberry Pi path:
 
 ---
 
+## Demo Mode (Remote Actuator Control)
+
+The dashboard includes a **Demo Mode** panel for safe remote actuator control
+during presentations. It allows the operator to manually send commands to the
+Arduino-connected servo/mechanism through the Raspberry Pi.
+
+### Architecture
+
+```text
+Dashboard (browser)
+  ↓ Tailscale / LAN
+Raspberry Pi 4B (dashboard backend)
+  ↓ USB serial (wired)
+Arduino Uno Q
+  ↓ GPIO / PCA9685
+Servo / Honey release mechanism
+```
+
+- The wireless/remote part is **only** Dashboard → Raspberry Pi (via Tailscale or LAN).
+- Raspberry Pi → Arduino remains **wired USB serial** for stability.
+- The dashboard never talks directly to Arduino.
+
+### Quick Start
+
+Run the full demo (Camera AI + safety control + dashboard):
+
+```bash
+./scripts/run_demo.sh
+```
+
+Or run the dashboard alone with Demo Mode for hardware testing:
+
+```bash
+python raspberry_pi/dashboard/app.py \
+  --log-dir data/logs \
+  --log-file data/logs/feeding_decision_log.csv \
+  --camera-log-file data/logs/camera_ai_log.csv \
+  --debug-frame-dir data/debug_frames \
+  --demo-serial-port /dev/ttyACM0 \
+  --demo-baudrate 115200 \
+  --demo-command-log-file data/logs/demo_commands.csv \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+Open `http://<pi-ip>:8080` from any browser on the same Tailscale network.
+
+### Usage
+
+1. Open the dashboard. The Demo Mode panel shows **DISABLED** by default.
+2. Click **Enable Demo Mode** to activate manual control.
+3. Use the control buttons:
+   - **Release / Open** — sends `RELEASE` to Arduino (requires Demo Mode enabled)
+   - **Stop / Close** — sends `STOP` to Arduino (always available)
+   - **Test Motion** — sends `TEST` to Arduino (requires Demo Mode enabled)
+   - **Emergency Stop** — immediately sends `STOP`, disables Demo Mode, and locks controls
+4. The status table shows:
+   - Last command sent
+   - Command timestamp
+   - Serial connection status (`CONNECTED` / `SIMULATION_MODE` / `ERROR`)
+   - Result (`SENT` / `SIMULATED` / `BLOCKED` / `ERROR`)
+   - Message
+
+### Safety Behavior
+
+- Default state is **STOP / closed**.
+- Demo Mode must be manually enabled before `Release` or `Test` commands are accepted.
+- `Stop / Close` and `Emergency Stop` are **always** available.
+- Emergency Stop immediately sends `STOP` and disables Demo Mode.
+- On serial error, the system falls back to **simulation mode** without controlling hardware.
+
+### Simulation Mode (Hardware-Free Rehearsal)
+
+If the Arduino is not connected or the serial port is unavailable, the dashboard
+automatically runs in simulation mode:
+
+```bash
+# Automatic fallback — just run without Arduino connected
+python raspberry_pi/dashboard/app.py --host 0.0.0.0 --port 8080
+
+# Or force simulation mode explicitly
+python raspberry_pi/dashboard/app.py --demo-force-simulation --host 0.0.0.0 --port 8080
+```
+
+In simulation mode:
+- All buttons work normally in the UI.
+- Commands are logged to `data/logs/demo_commands.csv`.
+- No serial data is sent to hardware.
+- Status shows `SIMULATION_MODE`.
+
+### API Endpoints
+
+The dashboard backend exposes these REST endpoints for Demo Mode:
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/demo-mode` | POST | Enable/disable Demo Mode (`{"enabled": true/false}`) |
+| `/api/demo-command` | POST | Send generic command (`{"command": "RELEASE"}`) |
+| `/api/demo/release` | POST | Send RELEASE command |
+| `/api/demo/stop` | POST | Send STOP command |
+| `/api/demo/test` | POST | Send TEST command |
+| `/api/demo/emergency-stop` | POST | Send EMERGENCY_STOP command |
+| `/api/demo-status` | GET | Get current demo status |
+
+All endpoints return JSON when called with `Accept: application/json` or
+`Content-Type: application/json`. From the browser UI, they use HTML form POST
+and redirect back to the dashboard.
+
+### Serial Commands
+
+The Raspberry Pi sends these simple string commands over USB serial to Arduino:
+
+| Command | Serial String | Description |
+|---|---|---|
+| Release / Open | `RELEASE\n` | Activate honey release mechanism |
+| Stop / Close | `STOP\n` | Deactivate mechanism (safe default) |
+| Test Motion | `TEST\n` | Run a short test motion |
+| Emergency Stop | `STOP\n` | Same as STOP, also disables Demo Mode |
+
+### Command Logging
+
+Every demo command is logged to CSV:
+
+```text
+data/logs/demo_commands.csv
+```
+
+CSV columns: `timestamp`, `command`, `serial_command`, `demo_enabled`,
+`serial_status`, `result`, `message`, `emergency_stop`.
+
+### CLI Options
+
+| Option | Default | Description |
+|---|---|---|
+| `--demo-serial-port` | `/dev/ttyACM0` | Serial port for Arduino connection |
+| `--demo-baudrate` | `115200` | Serial baud rate |
+| `--demo-command-log-file` | `data/logs/demo_commands.csv` | Path for demo command CSV log |
+| `--demo-serial-timeout` | `1.0` | Serial write timeout in seconds |
+| `--demo-serial-reset-delay` | `2.0` | Delay after opening serial port |
+| `--demo-force-simulation` | (off) | Force simulation mode even if serial port exists |
+
+---
+
 ## Data Format Notes
 
 - Arduino Uno sends **JSON Lines**.
