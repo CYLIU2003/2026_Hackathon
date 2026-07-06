@@ -248,6 +248,17 @@ def open_raw_capture(cv2, camera_source: str | int, backend_name: str, profile: 
     return capture
 
 
+def opencv_source_candidates(camera_source: str | int) -> list[str | int]:
+    if isinstance(camera_source, int):
+        return [camera_source]
+    source_text = str(camera_source)
+    source_path = Path(source_text)
+    name = source_path.name
+    if source_path.parent == Path("/dev") and name.startswith("video") and name[5:].isdigit():
+        return [source_text, int(name[5:])]
+    return [source_text]
+
+
 def read_frame_with_retries(capture, *, retries: int = 3, retry_delay_sec: float = 0.1):
     for _ in range(max(1, retries)):
         ok, frame = capture.read()
@@ -278,32 +289,33 @@ def open_camera_with_fallbacks(
     retry_delay_sec: float = 0.1,
 ) -> tuple[CameraOpenResult | None, Any | None]:
     for profile in profiles:
-        capture = open_raw_capture(cv2, camera_source, backend_name, profile)
-        if not capture.isOpened():
-            capture.release()
-            continue
-
-        frame = None
-        if read_test:
-            ok, frame = read_frame_with_retries(
-                capture,
-                retries=retries,
-                retry_delay_sec=retry_delay_sec,
-            )
-            if not ok or frame is None:
+        for opencv_source in opencv_source_candidates(camera_source):
+            capture = open_raw_capture(cv2, opencv_source, backend_name, profile)
+            if not capture.isOpened():
                 capture.release()
                 continue
 
-        result = CameraOpenResult(
-            capture=capture,
-            camera_source=camera_source,
-            selected_profile=profile,
-            actual_width=int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)),
-            actual_height=int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-            actual_fps=float(capture.get(cv2.CAP_PROP_FPS)),
-            actual_fourcc=actual_fourcc(cv2, capture),
-        )
-        return result, frame
+            frame = None
+            if read_test:
+                ok, frame = read_frame_with_retries(
+                    capture,
+                    retries=retries,
+                    retry_delay_sec=retry_delay_sec,
+                )
+                if not ok or frame is None:
+                    capture.release()
+                    continue
+
+            result = CameraOpenResult(
+                capture=capture,
+                camera_source=opencv_source,
+                selected_profile=profile,
+                actual_width=int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                actual_height=int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                actual_fps=float(capture.get(cv2.CAP_PROP_FPS)),
+                actual_fourcc=actual_fourcc(cv2, capture),
+            )
+            return result, frame
 
     return None, None
 

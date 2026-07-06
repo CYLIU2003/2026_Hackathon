@@ -6,6 +6,8 @@ from raspberry_pi.camera_ai.camera_capture import (
     camera_driver_from_config,
     device_caps_has_video_capture,
     fallback_profiles,
+    open_camera_with_fallbacks,
+    opencv_source_candidates,
     resolve_camera_source,
     select_camera_device,
 )
@@ -172,6 +174,35 @@ def test_fallback_profiles_try_mjpg_before_yuyv():
         CameraProfile(320, 240, 15, "MJPG"),
         CameraProfile(640, 480, 15, "YUYV"),
     ]
+
+
+def test_opencv_source_candidates_fall_back_from_video_path_to_index():
+    assert opencv_source_candidates("/dev/video0") == ["/dev/video0", 0]
+    assert opencv_source_candidates("/dev/video12") == ["/dev/video12", 12]
+    assert opencv_source_candidates(0) == [0]
+
+
+def test_open_camera_with_fallbacks_tries_index_when_video_path_fails():
+    path_capture = FakeCapture([], opened=False)
+    index_capture = FakeCapture([FakeFrame(90), FakeFrame(95)])
+    fake_cv2 = FakeCv2([path_capture, index_capture])
+
+    result, frame = open_camera_with_fallbacks(
+        fake_cv2,
+        camera_source="/dev/video0",
+        backend_name="v4l2",
+        profiles=[CameraProfile(320, 240, 5, "MJPG")],
+        read_test=True,
+        retries=1,
+        retry_delay_sec=0,
+    )
+
+    assert result is not None
+    assert frame is not None
+    assert result.camera_source == 0
+    assert path_capture.released is True
+    assert fake_cv2.created_captures[0].camera_source == "/dev/video0"
+    assert fake_cv2.created_captures[1].camera_source == 0
 
 
 def test_opencv_camera_driver_reads_stable_frame():

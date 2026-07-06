@@ -44,9 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--backend", choices=["v4l2", "any"], default="v4l2")
-    parser.add_argument("--width", type=int, default=640)
-    parser.add_argument("--height", type=int, default=480)
-    parser.add_argument("--fps", type=int, default=15)
+    parser.add_argument("--width", type=int, default=320)
+    parser.add_argument("--height", type=int, default=240)
+    parser.add_argument("--fps", type=int, default=5)
     parser.add_argument("--fourcc", default="MJPG", help="Camera pixel format, for example MJPG or YUYV.")
     parser.add_argument(
         "--single-profile",

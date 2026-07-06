@@ -423,6 +423,9 @@ python raspberry_pi/camera_ai/camera_test.py --device /dev/video0
 
 For the BUFFALO BSW500M USB camera on Raspberry Pi 4B, `/dev/video0` is the
 image capture device. `/dev/video1` is metadata and must not be used by OpenCV.
+If OpenCV cannot capture by the `/dev/video0` path name, `camera_capture.py`
+automatically retries the equivalent OpenCV camera index `0` while keeping
+`/dev/video0` as the configured device label.
 The default profile tries this on the resolved device first:
 
 ```text

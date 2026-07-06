@@ -12,7 +12,7 @@ BUFFALO BSW500M USB Camera
 Raspberry Pi 4B camera_ai
   |
   +-- camera_capture.py: auto BSW500M video-node selection, OpenCV/V4L2 driver,
-  |   fallback profiles, read retry, reopen
+  |   /dev/videoN -> OpenCV index fallback, fallback profiles, read retry, reopen
   |
   +-- camera_test.py: verify capture and save one debug frame
   |
