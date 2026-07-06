@@ -9,6 +9,7 @@ dashboard, and remote monitoring.
 |---|---|---|
 | `camera_ai/` | USB camera capture, YOLO inference, AI state logging, model tooling | `python -m raspberry_pi.camera_ai.run_camera_ai --device /dev/video0 --terminal-status --no-jsonl` |
 | `safety_control/` | Camera + mock contact decision mirror and unified CSV | `python -m raspberry_pi.safety_control.safety_controller --input-mode camera` |
+| `integration/safety_to_actuator.py` | Bridges `RELEASE_ON/OFF` from the safety CSV to Arduino serial commands | `python -m raspberry_pi.integration.safety_to_actuator --input data/logs/feeding_decision_log.csv --port /dev/ttyACM0` |
 | `camera_ai/web_camera_ai.py` | Live browser view over SSH port forwarding | `python raspberry_pi/camera_ai/web_camera_ai.py --device /dev/video0 --host 127.0.0.1 --port 8081` |
 | `dashboard/` | Browser dashboard for latest logs and debug camera image | `python raspberry_pi/dashboard/app.py --log-dir data/logs --host 0.0.0.0 --port 8080` |
 | `logger/` | Serial JSON Lines to CSV logger for Arduino Uno | `python raspberry_pi/logger/serial_logger.py --serial-port /dev/ttyACM0` |
@@ -36,6 +37,17 @@ data/logs/feeding_decision_log.csv
 This prototype uses simulated sensor inputs. The Raspberry Pi decision is for
 presentation and integration testing; Arduino Uno Q remains the authoritative
 physical safety controller.
+
+To run the full venue path from camera recognition through Arduino mechanism
+motion, connect the Arduino over USB and start:
+
+```bash
+RUN_CAMERA_AI_INFERENCE=1 RUN_ACTUATOR_BRIDGE=1 ./scripts/run_demo.sh
+```
+
+The actuator bridge sends `RELEASE` only when the latest safety CSV row is fresh
+and says `RELEASE_ON`. Missing/stale data, `ERROR_SAFE`, or emergency stop keeps
+the bridge on `STOP`.
 
 Open the dashboard:
 

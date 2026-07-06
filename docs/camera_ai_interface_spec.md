@@ -68,13 +68,13 @@ This module must not directly set `release_state` to `RELEASE_ON`.
 ## Model Runtime Contract
 
 The Pi 4B 4GB runtime should prefer exported lightweight models over raw
-PyTorch weights:
+PyTorch weights. If `models/yolo_bear.onnx` exists, the loader prefers it over
+NCNN to avoid native-runtime crashes seen on some Pi images:
 
 ```text
-primary: models/yolo_bear_ncnn_model
+preferred: models/yolo_bear.onnx or models/yolo_bear_ncnn_model
 fallbacks:
   - models/yolo_bear_int8.tflite
-  - models/yolo_bear.onnx
   - models/yolo_bear.pt
 ```
 
@@ -86,10 +86,14 @@ transferred training result such as `models/yolo_bear.pt` to work even when the
 preferred `models/yolo_bear_ncnn_model` export is present but the NCNN Python
 runtime is not installed yet.
 
-For Raspberry Pi 4B operation, install `ncnn` from
-`raspberry_pi/camera_ai/requirements.txt` and use
-`models/yolo_bear_ncnn_model` as the normal runtime path. The PyTorch `.pt`
-fallback is intended mainly for development and transfer convenience.
+For Raspberry Pi 4B operation, install
+`raspberry_pi/camera_ai/requirements.txt` and use `models/yolo_bear.onnx` or
+`models/yolo_bear_ncnn_model` as the normal runtime path. ONNX models are run
+with ONNX Runtime, so opset 18 exports are acceptable. This runtime requirements
+file intentionally excludes PyTorch and Ultralytics. The PyTorch `.pt` fallback
+is intended mainly for development and transfer convenience and requires
+`raspberry_pi/camera_ai/requirements.export.txt` in a Colab or development
+environment.
 
 ## Future Integration
 

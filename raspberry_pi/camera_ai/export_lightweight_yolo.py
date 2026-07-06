@@ -91,7 +91,10 @@ def main() -> int:
         from ultralytics import YOLO
     except ImportError as exc:
         raise SystemExit(
-            "ultralytics is not installed. Install raspberry_pi/camera_ai/requirements.txt."
+            "ultralytics is not installed. Install "
+            "raspberry_pi/camera_ai/requirements.export.txt in a Colab/development "
+            "environment, not on the Raspberry Pi runtime unless you intentionally "
+            "need the .pt fallback."
         ) from exc
 
     export_kwargs = {

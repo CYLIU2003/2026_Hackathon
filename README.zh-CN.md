@@ -406,14 +406,17 @@ NCNN模型作为正常运行路径。
 在 `extract("out0")` 时发生 SIGSEGV，Camera AI 会立刻崩溃，画面会停在最后一帧。
 此时无需在 Pi 上安装 PyTorch，只要用 Colab 把 `.pt` 导出为 ONNX 并放置
 `models/yolo_bear.onnx`，Camera AI 会自动优先使用
-ONNX + OpenCV `cv2.dnn` 推理路径（无需 NCNN/Pi 上无需安装 PyTorch）。
+ONNX Runtime 推理路径（无需 NCNN/Pi 上无需安装 PyTorch 或 Ultralytics）。
+因此 Raspberry Pi 运行时的 `raspberry_pi/camera_ai/requirements.txt`
+包含 `onnxruntime`，但不包含 PyTorch 和 Ultralytics。只有在 Colab 或开发电脑上进行训练/导出时，
+才使用 `raspberry_pi/camera_ai/requirements.export.txt`。
 
-ONNX 导出流程（在 Colab 上执行，不在 Pi 上安装任何东西）：
+ONNX 导出流程（在 Colab 上执行，Pi 只需要 runtime requirements）：
 
 ```text
 1. 打开 notebooks/export_bear_yolo_onnx.ipynb
 2. 上传仓库的 best.pt
-3. 运行全部 cell，导出 models/yolo_bear.onnx（imgsz=256, opset=12, simplify）
+3. 运行全部 cell，导出 models/yolo_bear.onnx（imgsz=256, opset 18；仅转换成功时为 opset 12）
 4. 下载 yolo_bear.onnx，放置到 Pi 的 models/yolo_bear.onnx
 5. 在 Pi 上重新运行 ./scripts/run_demo.sh
 6. 确认 ai_model_ok=true 且画面持续更新
@@ -610,12 +613,24 @@ python -m pip install -r raspberry_pi/camera_ai/requirements.txt
 python -m pip install -r raspberry_pi/dashboard/requirements.txt
 ```
 
+Camera AI 运行时安装面向 ONNX/NCNN，Raspberry Pi 上有意不安装
+PyTorch/Ultralytics。
+
 正常演示启动。这个命令会同时启动 Camera AI、模拟接触垫安全判断、
 统一CSV日志和远程仪表盘：
 
 ```bash
 ./scripts/run_demo.sh
 ```
+
+会场上如需从实时摄像头推理一路跑到 Arduino 机构动作：
+
+```bash
+RUN_CAMERA_AI_INFERENCE=1 RUN_ACTUATOR_BRIDGE=1 ./scripts/run_demo.sh
+```
+
+桥接进程只会在最新安全 CSV 行为 `RELEASE_ON` 时向 Arduino 发送 `RELEASE`。
+缺失、过期或错误数据会保持/发送 `STOP`。
 
 从同一网络中的电脑、平板、手机，或通过 Tailscale 打开：
 

@@ -20,8 +20,9 @@ Run commands from the repository root:
 cd ~/Desktop/2026_Hackathon
 ```
 
-Create the virtual environment and install the camera AI + dashboard
-dependencies:
+Create the virtual environment and install the camera AI + dashboard runtime
+dependencies. The runtime requirements intentionally do not install PyTorch or
+Ultralytics; use ONNX/NCNN models on the Raspberry Pi.
 
 ```bash
 python3 -m venv .venv
@@ -29,6 +30,13 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r raspberry_pi/camera_ai/requirements.txt
 python -m pip install -r raspberry_pi/dashboard/requirements.txt
+```
+
+For Colab or a development PC that exports `.pt` weights to ONNX/NCNN, use the
+separate export dependencies instead:
+
+```bash
+python -m pip install -r raspberry_pi/camera_ai/requirements.export.txt
 ```
 
 ## Quick Start: Camera AI + Remote Dashboard
@@ -263,7 +271,7 @@ v4l2-ctl --device=/dev/video0 --all
 v4l2-ctl --device=/dev/video0 --list-formats-ext
 ```
 
-Create a Python virtual environment and install Python dependencies:
+Create a Python virtual environment and install runtime Python dependencies:
 
 ```bash
 python3 -m venv .venv
@@ -271,6 +279,9 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r raspberry_pi/camera_ai/requirements.txt
 ```
+
+This Raspberry Pi runtime install is for camera capture plus ONNX/NCNN
+inference. It does not install PyTorch or Ultralytics.
 
 Place a lightweight exported YOLO model at the primary path configured in
 `config.camera_ai.yaml`:
@@ -281,19 +292,21 @@ models/yolo_bear_ncnn_model
 
 Raw training data and intermediate Colab artifacts are intentionally ignored by
 Git. The selected runtime files under `models/yolo_bear_ncnn_model` and
-`models/yolo_bear.pt` may be committed intentionally when using GitHub to
+`models/yolo_bear.onnx` may be committed intentionally when using GitHub to
 transfer the trained model to the Raspberry Pi.
-The current runtime also accepts the transferred trained PyTorch weights at:
+The current runtime can still accept development-only transferred PyTorch
+weights at:
 
 ```text
 models/yolo_bear.pt
 ```
 
 At startup, `run_camera_ai.py` tries the existing configured model paths in
-order. On Raspberry Pi 4B, use the preferred NCNN export plus the `ncnn`
-Python runtime from `requirements.txt`. The raw PyTorch `.pt` fallback is kept
-for development and transfer convenience, but it can be slower and may not be
-stable on every Pi/PyTorch wheel combination.
+order. On Raspberry Pi 4B, prefer `models/yolo_bear.onnx` or the NCNN export
+plus the `ncnn` Python runtime from `requirements.txt`. The raw PyTorch `.pt`
+fallback is kept for development and transfer convenience only; it requires
+`requirements.export.txt` and may not be stable on every Pi/PyTorch wheel
+combination.
 
 The Raspberry Pi 4B 4GB profile uses:
 
@@ -306,11 +319,13 @@ inference interval: about 2.0 sec
 remote dashboard JPEG update interval: about 1.0 sec
 ```
 
-For prototype bring-up, this file may be a COCO-pretrained nano model. The
-filename can be `yolo_bear.pt` even while the contents are generic COCO weights:
+For prototype bring-up on Colab or a development PC, this file may be a
+COCO-pretrained nano model. The filename can be `yolo_bear.pt` even while the
+contents are generic COCO weights:
 
 ```bash
 mkdir -p models
+python -m pip install -r raspberry_pi/camera_ai/requirements.export.txt
 python - <<'PY'
 from ultralytics import YOLO
 YOLO("yolov8n.pt")
@@ -353,18 +368,18 @@ python raspberry_pi/camera_ai/export_lightweight_yolo.py \
 If you only want to confirm the camera first, the YOLO model is not required for
 `camera_test.py`. The model is required for `run_camera_ai.py`.
 
-After installing dependencies, verify that Python can import the required
-packages:
+After installing Raspberry Pi runtime dependencies, verify that Python can
+import the required runtime packages:
 
 ```bash
 source .venv/bin/activate
 python - <<'PY'
 import cv2
+import onnxruntime
 import yaml
-import ultralytics
 print("cv2", cv2.__version__)
+print("onnxruntime", onnxruntime.__version__)
 print("yaml", yaml.__version__)
-print("ultralytics", ultralytics.__version__)
 PY
 ```
 

@@ -66,7 +66,9 @@ def main() -> int:
         from ultralytics import YOLO
     except ImportError as exc:
         raise SystemExit(
-            "ultralytics is not installed. Install raspberry_pi/camera_ai/requirements.txt."
+            "ultralytics is not installed. Install "
+            "raspberry_pi/camera_ai/requirements.export.txt in a Colab/development "
+            "environment before training."
         ) from exc
 
     model = YOLO(args.base_model)

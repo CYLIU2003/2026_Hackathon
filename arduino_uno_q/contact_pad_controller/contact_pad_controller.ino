@@ -1,7 +1,14 @@
 #include <Arduino.h>
+#include "config.h"
+
+#if GODA_ACTUATOR_MODE == GODA_ACTUATOR_MODE_PCA9685
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
-#include "config.h"
+#elif GODA_ACTUATOR_MODE == GODA_ACTUATOR_MODE_DIRECT_SERVO
+#include <Servo.h>
+#else
+#error "GODA_ACTUATOR_MODE must be GODA_ACTUATOR_MODE_PCA9685 or GODA_ACTUATOR_MODE_DIRECT_SERVO"
+#endif
 
 #if BIA_INPUT_ENABLED
 #if BIA_USE_HARDWARE_SERIAL1
@@ -12,7 +19,13 @@ SoftwareSerial bia_serial(PIN_BIA_SERIAL_RX, PIN_BIA_SERIAL_TX_UNUSED);
 #endif
 #endif
 
+#if GODA_ACTUATOR_MODE == GODA_ACTUATOR_MODE_PCA9685
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(GODA_PCA9685_I2C_ADDRESS);
+#endif
+
+#if GODA_ACTUATOR_MODE == GODA_ACTUATOR_MODE_DIRECT_SERVO
+Servo goda_direct_servo;
+#endif
 
 int current_servo_angle = GODA_SERVO_CLOSED_ANGLE;
 bool actuator_open = false;
@@ -87,7 +100,11 @@ int angle_to_pulse(int angle) {
 
 void write_servo_angle(int angle) {
   angle = constrain(angle, 0, 180);
+#if GODA_ACTUATOR_MODE == GODA_ACTUATOR_MODE_PCA9685
   pwm.setPWM(GODA_SERVO_CHANNEL, 0, angle_to_pulse(angle));
+#else
+  goda_direct_servo.write(angle);
+#endif
   current_servo_angle = angle;
 }
 
@@ -126,11 +143,16 @@ void open_release_gate() {
 }
 
 void init_release_actuator() {
+#if GODA_ACTUATOR_MODE == GODA_ACTUATOR_MODE_PCA9685
   Wire.begin();
   pwm.begin();
   pwm.setOscillatorFrequency(27000000);
   pwm.setPWMFreq(50);
   delay(10);
+#else
+  goda_direct_servo.attach(PIN_GODA_DIRECT_SERVO);
+  delay(10);
+#endif
   write_servo_angle(GODA_SERVO_CLOSED_ANGLE);
   actuator_open = false;
 }
@@ -800,6 +822,13 @@ void emit_json_line() {
   print_bool(actuator_open);
   Serial.print(F(",\"servo_angle\":"));
   Serial.print(current_servo_angle);
+  Serial.print(F(",\"actuator_mode\":\""));
+#if GODA_ACTUATOR_MODE == GODA_ACTUATOR_MODE_PCA9685
+  Serial.print(F("PCA9685"));
+#else
+  Serial.print(F("DIRECT_SERVO"));
+#endif
+  Serial.print(F("\""));
   Serial.print(F(",\"auto_test_mode\":"));
   print_bool(auto_test_mode);
   Serial.print(F(",\"error_code\":\""));

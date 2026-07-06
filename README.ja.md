@@ -407,16 +407,19 @@ Raspberry Pi の立ち上げ確認では、`.pt` の PyTorch フォールバッ�
 ビルド）が `extract("out0")` で SIGSEGV し、Camera AI が即死して画面が最後の
 フレームで止まる場合は、Pi 側に PyTorch を入れずに Colab で `.pt` を ONNX に
 書き出し、`models/yolo_bear.onnx` を置くだけで Camera AI は自動的に
-ONNX + OpenCV `cv2.dnn` の推論経路を優先する（NCNN 不要 / Pi 上の PyTorch
+ONNX Runtime の推論経路を優先する（NCNN 不要 / Pi 上の PyTorch・Ultralytics
 インストール不要）。
+そのため Raspberry Pi 実行用の `raspberry_pi/camera_ai/requirements.txt` は
+`onnxruntime` を含めるが、PyTorch と Ultralytics は含めない。学習・書き出し作業だけ、Colab または開発PCで
+`raspberry_pi/camera_ai/requirements.export.txt` を使う。
 
-ONNX 書き出し手順（Colab で実行し、Pi には何もインストールしない）:
+ONNX 書き出し手順（Colab で実行し、Pi は runtime requirements のみ）:
 
 ```text
 1. notebooks/export_bear_yolo_onnx.ipynb を開く
 2. リポジトリの best.pt をアップロード
 3. すべてのセルを実行し models/yolo_bear.onnx を書き出す
-   (imgsz=256, opset=12, simplify)
+   (imgsz=256, opset 18。opset 12 は変換成功時のみ)
 4. yolo_bear.onnx をダウンロードし、Pi の models/yolo_bear.onnx に配置
 5. Pi で ./scripts/run_demo.sh を再起動
 6. ai_model_ok=true であり、画面が更新され続けることを確認
@@ -624,11 +627,23 @@ python -m pip install -r raspberry_pi/camera_ai/requirements.txt
 python -m pip install -r raspberry_pi/dashboard/requirements.txt
 ```
 
+Camera AI の実行用インストールは ONNX/NCNN 前提であり、Raspberry Pi 上では
+PyTorch/Ultralytics を意図的に入れない。
+
 通常のデモ起動。Camera AI と遠隔ダッシュボードをまとめて起動する。
 
 ```bash
 ./scripts/run_demo.sh
 ```
+
+会場で、実カメラ推論から Arduino 機構動作まで一通り動かす場合:
+
+```bash
+RUN_CAMERA_AI_INFERENCE=1 RUN_ACTUATOR_BRIDGE=1 ./scripts/run_demo.sh
+```
+
+ブリッジは新しい安全CSV行が `RELEASE_ON` の時だけ Arduino に `RELEASE` を送る。
+欠損・古いログ・エラー時は `STOP` 側を維持する。
 
 同じネットワーク上のPC、タブレット、スマートフォン、または Tailscale 経由で開く。
 

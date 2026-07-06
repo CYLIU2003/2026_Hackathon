@@ -10,10 +10,12 @@ import numpy as np
 class YoloBearDetector:
     """Small YOLO wrapper that returns plain detection dictionaries.
 
-    Supports two backends:
+    Supports three backends:
 
     * **NCNN** (primary) — for ``models/yolo_bear_ncnn_model/`` directories.
       Uses ``ncnn`` package.  No PyTorch / ultralytics required.
+    * **ONNX Runtime** — for ``.onnx`` files, including opset 18 exports.
+      Uses ``onnxruntime`` plus OpenCV image preprocessing.
     * **Ultralytics** (fallback) — for ``.pt`` files.  Requires
       ``ultralytics`` and PyTorch.
     """
@@ -38,13 +40,15 @@ class YoloBearDetector:
         if not Path(self.model_path).exists():
             raise RuntimeError(
                 f"YOLO model file is missing: {self.model_path}. "
-                "Place an exported lightweight model at models/yolo_bear_ncnn_model "
-                "or a fallback prototype model at models/yolo_bear.pt."
+                "Place an exported runtime model at models/yolo_bear.onnx or "
+                "models/yolo_bear_ncnn_model, or use a development-only fallback "
+                "prototype model at models/yolo_bear.pt."
             )
 
-        self._backend: str  # "ncnn" | "ultralytics"
+        self._backend: str  # "ncnn" | "onnxruntime" | "ultralytics"
         self._class_names: dict[int, str] = {}
 
+        self._check_runtime_dependency()
         if self._is_ncnn_model(self.model_path):
             self._init_ncnn()
         elif self._is_onnx_model(self.model_path):
@@ -63,7 +67,7 @@ class YoloBearDetector:
         """
         if self._backend == "ncnn":
             return self._detect_ncnn(frame)
-        if self._backend == "onnx":
+        if self._backend == "onnxruntime":
             return self._detect_onnx(frame)
         return self._detect_ultralytics(frame)
 
@@ -80,18 +84,44 @@ class YoloBearDetector:
     def _is_onnx_model(model_path: str) -> bool:
         return Path(model_path).suffix.lower() == ".onnx" and Path(model_path).is_file()
 
+    def _check_runtime_dependency(self) -> None:
+        """Fail early with backend-specific install guidance."""
+        if self._is_ncnn_model(self.model_path):
+            if importlib.util.find_spec("ncnn") is None:
+                raise RuntimeError(
+                    "NCNN runtime is not installed. Install "
+                    "raspberry_pi/camera_ai/requirements.txt on the Raspberry Pi "
+                    "or place an ONNX model at models/yolo_bear.onnx."
+                )
+            return
+        if self._is_onnx_model(self.model_path):
+            if importlib.util.find_spec("cv2") is None:
+                raise RuntimeError(
+                    "OpenCV (cv2) is not installed. Install "
+                    "raspberry_pi/camera_ai/requirements.txt to use the ONNX backend."
+                )
+            if importlib.util.find_spec("onnxruntime") is None:
+                raise RuntimeError(
+                    "ONNX Runtime is not installed. Install "
+                    "raspberry_pi/camera_ai/requirements.txt to use opset 18 "
+                    "ONNX models such as models/yolo_bear.onnx."
+                )
+            return
+        if importlib.util.find_spec("ultralytics") is None:
+            raise RuntimeError(
+                "ultralytics is not installed. It is only required for .pt fallback "
+                "models and export work. Prefer models/yolo_bear.onnx or "
+                "models/yolo_bear_ncnn_model on Raspberry Pi, or install "
+                "raspberry_pi/camera_ai/requirements.export.txt in a Colab/development "
+                "environment."
+            )
+
     # ------------------------------------------------------------------
     # NCNN backend
     # ------------------------------------------------------------------
 
     def _init_ncnn(self) -> None:
         import ncnn
-
-        if importlib.util.find_spec("ncnn") is None:
-            raise RuntimeError(
-                "NCNN runtime is not installed. Install ncnn on the Raspberry Pi "
-                "or use fallback PyTorch weights such as models/yolo_bear.pt."
-            )
 
         model_dir = Path(self.model_path)
         param_files = sorted(model_dir.glob("*.ncnn.param"))
@@ -218,25 +248,44 @@ class YoloBearDetector:
         return {int(k): str(v) for k, v in names.items()}
 
     # ------------------------------------------------------------------
-    # ONNX (cv2.dnn) backend — no PyTorch / ultralytics required
+    # ONNX Runtime backend — no PyTorch / ultralytics required
     # ------------------------------------------------------------------
 
     def _init_onnx(self) -> None:
         try:
             import cv2
+            import onnxruntime as ort
         except ImportError as exc:
             raise RuntimeError(
-                "OpenCV (cv2) is not installed. Install opencv-python to use the ONNX backend."
+                "OpenCV (cv2) and ONNX Runtime are required for the ONNX backend. "
+                "Install raspberry_pi/camera_ai/requirements.txt on the Raspberry Pi."
             ) from exc
 
         self._cv2 = cv2
-        self._onnx_net = cv2.dnn.readNetFromONNX(self.model_path)
-        # Prefer CPU backend for stability on Raspberry Pi.
-        try:
-            self._onnx_net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-            self._onnx_net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-        except Exception:
-            pass
+        session_options = ort.SessionOptions()
+        session_options.intra_op_num_threads = 1
+        session_options.inter_op_num_threads = 1
+        self._onnx_session = ort.InferenceSession(
+            self.model_path,
+            sess_options=session_options,
+            providers=["CPUExecutionProvider"],
+        )
+        model_inputs = self._onnx_session.get_inputs()
+        if not model_inputs:
+            raise RuntimeError(f"ONNX model has no inputs: {self.model_path}")
+        self._onnx_input_name = model_inputs[0].name
+        self._onnx_output_names = [
+            output.name for output in self._onnx_session.get_outputs()
+        ]
+        input_shape = list(getattr(model_inputs[0], "shape", []) or [])
+        if (
+            len(input_shape) == 4
+            and isinstance(input_shape[2], int)
+            and isinstance(input_shape[3], int)
+            and input_shape[2] > 0
+            and input_shape[2] == input_shape[3]
+        ):
+            self.input_size = int(input_shape[2])
 
         # Load class names from sibling metadata.yaml if present.
         model_file = Path(self.model_path)
@@ -246,7 +295,7 @@ class YoloBearDetector:
         else:
             self._class_names = {0: "bear"}
 
-        self._backend = "onnx"
+        self._backend = "onnxruntime"
 
     def _detect_onnx(self, frame: Any) -> list[dict]:
         cv2 = self._cv2
@@ -254,16 +303,18 @@ class YoloBearDetector:
         frame_area = max(1, int(frame_width) * int(frame_height))
 
         # Preprocess: letterbox-free simple resize + normalize (0..1).
-        blob = cv2.dnn.blobFromImage(
-            frame,
-            scalefactor=1.0 / 255.0,
-            size=(self.input_size, self.input_size),
-            mean=(0.0, 0.0, 0.0),
-            swapRB=True,
-            crop=False,
+        resized = cv2.resize(frame, (self.input_size, self.input_size))
+        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+        input_tensor = np.ascontiguousarray(
+            rgb.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
         )
-        self._onnx_net.setInput(blob)
-        out = self._onnx_net.forward()
+        outputs = self._onnx_session.run(
+            self._onnx_output_names,
+            {self._onnx_input_name: input_tensor},
+        )
+        if not outputs:
+            return []
+        out = outputs[0]
 
         # Ultralytics YOLOv8 ONNX output layout: [1, 4+nc, num_anchors] with
         # rows [cx, cy, w, h, cls0_score, cls1_score, ...] and NO objectness.
@@ -318,8 +369,10 @@ class YoloBearDetector:
             from ultralytics import YOLO
         except ImportError as exc:
             raise RuntimeError(
-                "ultralytics is not installed. Install raspberry_pi/camera_ai/requirements.txt "
-                "or use an NCNN model at models/yolo_bear_ncnn_model/."
+                "ultralytics is not installed. Install "
+                "raspberry_pi/camera_ai/requirements.export.txt in a Colab/development "
+                "environment, or use models/yolo_bear.onnx / "
+                "models/yolo_bear_ncnn_model on Raspberry Pi."
             ) from exc
 
         try:

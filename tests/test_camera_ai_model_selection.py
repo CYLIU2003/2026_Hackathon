@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from raspberry_pi.camera_ai.export_lightweight_yolo import default_output_path
@@ -90,7 +91,7 @@ def test_resolve_model_candidates_keeps_existing_runtime_fallback_order(
 def test_resolve_model_candidates_prefers_onnx_over_ncnn(tmp_path, monkeypatch):
     """When both NCNN dir and ONNX file exist, ONNX is preferred.
 
-    This lets a dropped-in yolo_bear.onnx switch the system to the cv2.dnn
+    This lets a dropped-in yolo_bear.onnx switch the system to the ONNX Runtime
     ONNX backend automatically on platforms where the NCNN runtime segfaults.
     """
     monkeypatch.setattr(run_camera_ai, "REPO_ROOT", tmp_path)
@@ -159,6 +160,70 @@ def test_ncnn_model_without_runtime_fails_before_ultralytics_load(
 
     with pytest.raises(RuntimeError, match="NCNN runtime is not installed"):
         detector._check_runtime_dependency()
+
+
+def test_onnx_model_without_runtime_fails_with_onnxruntime_guidance(
+    tmp_path, monkeypatch
+):
+    onnx_model = tmp_path / "models" / "yolo_bear.onnx"
+    onnx_model.parent.mkdir(parents=True)
+    onnx_model.write_text("placeholder", encoding="utf-8")
+
+    detector = YoloBearDetector.__new__(YoloBearDetector)
+    detector.model_path = str(onnx_model)
+
+    def fake_find_spec(module_name):
+        if module_name == "onnxruntime":
+            return None
+        return object()
+
+    monkeypatch.setattr(
+        "raspberry_pi.camera_ai.bear_detector.importlib.util.find_spec",
+        fake_find_spec,
+    )
+
+    with pytest.raises(RuntimeError, match="ONNX Runtime is not installed"):
+        detector._check_runtime_dependency()
+
+
+def test_onnxruntime_detection_uses_exported_images_tensor_shape():
+    import cv2
+
+    class FakeOnnxSession:
+        def __init__(self):
+            self.feed = None
+
+        def run(self, output_names, feed):
+            self.feed = feed
+            out = np.zeros((1, 5, 1344), dtype=np.float32)
+            out[0, :, 0] = [128.0, 128.0, 64.0, 64.0, 0.9]
+            return [out]
+
+    fake_session = FakeOnnxSession()
+    detector = YoloBearDetector.__new__(YoloBearDetector)
+    detector._cv2 = cv2
+    detector._onnx_session = fake_session
+    detector._onnx_input_name = "images"
+    detector._onnx_output_names = ["output0"]
+    detector.input_size = 256
+    detector.confidence_floor = 0.5
+    detector.class_ids = ()
+    detector._class_names = {0: "bear"}
+
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    detections = detector._detect_onnx(frame)
+
+    feed_tensor = fake_session.feed["images"]
+    assert feed_tensor.shape == (1, 3, 256, 256)
+    assert feed_tensor.dtype == np.float32
+    assert detections == [
+        {
+            "class_name": "bear",
+            "confidence": pytest.approx(0.9),
+            "bbox_xyxy": [120.0, 90.0, 200.0, 150.0],
+            "box_area_ratio": pytest.approx(0.0625),
+        }
+    ]
 
 
 def test_default_export_output_paths_match_runtime_fallbacks():

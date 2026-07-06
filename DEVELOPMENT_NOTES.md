@@ -1,6 +1,6 @@
 # 開発ノート / Development Notes
 
-最終更新: 2026-07-06T09:43:45+09:00
+最終更新: 2026-07-06T11:22:08+09:00
 対象: A1 Bear Honey Buffet / Front Paw Contact Pad Safety Control System  
 タイムゾーン: Asia/Tokyo (UTC+09:00)
 
@@ -1131,3 +1131,153 @@ Colab のデフォルト Python 3.12 + torch 2.11 環境で `onnxscript` が
   ハッカソン演示には十分だが、誤検出が多い場合は NMS を追加すること。
 - 既存の stale テスト `test_ncnn_model_without_runtime_fails_before_ultralytics_load`
   を別途 `_init_ncnn` の RuntimeError 期待に更新すること。
+
+### 2026-07-06T11:10:54+09:00 — Camera AI 依存分離と Colab export 復旧
+
+根拠: 未コミット差分とファイルシステム編集時刻。Gitコミット日時ではない。
+
+目的:
+
+- Colab で `torch` / `torchvision` / `ultralytics` / `onnx` を一度アンインストール
+  してから再インストールする手順が、途中キャンセル時に `ultralytics` 欠落と
+  `torchvision` 欠落を起こしていたため、再発しにくい export 手順へ修正する。
+- Raspberry Pi 実行環境では PyTorch/Ultralytics を入れず、ONNX/NCNN runtime に
+  依存を限定する。
+
+変更ファイル:
+
+- `raspberry_pi/camera_ai/requirements.txt`
+- `raspberry_pi/camera_ai/requirements.export.txt` (新規)
+- `notebooks/export_bear_yolo_onnx.ipynb`
+- `raspberry_pi/camera_ai/bear_detector.py`
+- `raspberry_pi/camera_ai/run_camera_ai.py`
+- `raspberry_pi/camera_ai/export_lightweight_yolo.py`
+- `raspberry_pi/camera_ai/train_bear_yolo.py`
+- `raspberry_pi/camera_ai/README.md`
+- `README.md`, `README.ja.md`, `README.zh-CN.md`
+- `docs/camera_ai_interface_spec.md`
+- `tests/test_camera_ai_model_selection.py`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- Pi 実行用 `requirements.txt` から `ultralytics` を削除し、
+  OpenCV/ONNX Runtime/PyYAML/NCNN/Flask の runtime 依存に限定。
+- Colab/開発PCの学習・export 用に `requirements.export.txt` を追加し、
+  export 後の読み込み確認用に `onnxruntime` も含めた。
+- `export_bear_yolo_onnx.ipynb` の失敗した実行出力を消し、`pip uninstall` を廃止。
+  既存 `torch` / `torchvision` は残し、import 不可の時だけ CPU wheel
+  (`torch==2.5.1`, `torchvision==0.20.1`) を修復する手順へ変更。
+  `ultralytics` は `--no-deps` で入れ、Colab の working torch stack を置換しない。
+- `YoloBearDetector._check_runtime_dependency()` を追加し、NCNN/ONNX/Ultralytics の
+  backend 別に早期エラーと正しいインストール案内を出すよう修正。
+- ONNX backend を ONNX Runtime 実行へ寄せ、opset 18 export でも Pi 側で扱える
+  runtime contract に更新。
+- `run_camera_ai.py` とモデル選択テストの ONNX 優先説明を ONNX Runtime に合わせた。
+- export/training スクリプトの `ultralytics` 欠落メッセージを
+  `requirements.export.txt` 参照へ変更。
+- README/仕様書に Pi runtime と Colab/export 依存の分離を追記。
+
+安全・インターフェースへの影響:
+
+- Arduino Uno Q の RELEASE_ON/OFF 判定、状態機械、JSON Lines/CSV interface は変更なし。
+- Camera AI は引き続き追加認識層であり、単独で蜂蜜放出を許可しない。
+- モデルや依存が欠落した場合は `AI_MODEL_LOAD_ERROR` / `ai_model_ok=false` で安全側を維持。
+
+検証:
+
+- `python3 -m json.tool notebooks/export_bear_yolo_onnx.ipynb >/dev/null` → OK
+- `.venv/bin/python -m py_compile raspberry_pi/camera_ai/bear_detector.py
+  raspberry_pi/camera_ai/export_lightweight_yolo.py
+  raspberry_pi/camera_ai/train_bear_yolo.py` → OK
+- `.venv/bin/python -m pytest tests/test_camera_ai_model_selection.py
+  tests/test_camera_ai_approach_logic.py tests/test_decision_logic.py` → 21 passed
+- `.venv/bin/python -m pytest` → 52 passed
+
+結果:
+
+- 未コミット変更として記録。Pi 側 runtime install が PyTorch/Ultralytics を引き込まない
+  構成になった。
+- 前回残課題だった stale テストは `_check_runtime_dependency()` 追加により解消。
+
+残課題:
+
+- Colab 上で修正後 notebook を実行し、`ultralytics` import と ONNX export が通ることを確認する。
+- Pi に `models/yolo_bear.onnx` を配置後、`./scripts/run_demo.sh` で `ai_model_ok=true` を確認する。
+
+### 2026-07-06T11:21:38+09:00 — 会場用 Camera AI → Arduino 機構ブリッジ
+
+根拠: 未コミット差分とファイルシステム編集時刻。Gitコミット日時ではない。
+
+目的:
+
+- ハッカソン会場で、USBカメラの熊認識から安全判定ミラーを経由して Arduino の
+  機構動作まで一通り確認できる経路を用意する。
+- 郷田さんの最新 `Haruka GODA/beehivemotorC++/0to90.ino` に合わせ、
+  Arduino メインスケッチを D3 直結サーボでも動くようにする。
+
+変更ファイル:
+
+- `arduino_uno_q/contact_pad_controller/config.h`
+- `arduino_uno_q/contact_pad_controller/contact_pad_controller.ino`
+- `arduino_uno_q/contact_pad_controller/README.md`
+- `raspberry_pi/integration/safety_to_actuator.py` (新規)
+- `scripts/run_demo.sh`
+- `raspberry_pi/README.md`
+- `README.md`, `README.ja.md`, `README.zh-CN.md`
+- `tests/test_safety_to_actuator.py` (新規)
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- `GODA_ACTUATOR_MODE_DIRECT_SERVO` / `GODA_ACTUATOR_MODE_PCA9685` を追加し、
+  既定を郷田さんの `0to90.ino` と同じ D3 直結サーボに変更。
+- `contact_pad_controller.ino` の actuator layer を `Servo.h` direct servo と
+  PCA9685 の条件コンパイルに分離。状態機械、timeout、cooldown、ERROR_SAFE は維持。
+- Arduino JSON Lines に `actuator_mode` を追加し、会場で direct/PCA9685 の
+  どちらを書き込んだか確認できるようにした。
+- `safety_to_actuator.py` を追加。`feeding_decision_log.csv` の最新行が新鮮で
+  `RELEASE_ON` の時だけ Arduino に `RELEASE` を送り、欠損・古いログ・ERROR_SAFE・
+  emergency stop では `STOP` 側に倒す。
+- `run_demo.sh` に `RUN_ACTUATOR_BRIDGE=1` と `ACTUATOR_BRIDGE_NO_SERIAL=1` を追加。
+  既定は bridge OFF なので、不意に機構は動かない。
+- README に会場用コマンド
+  `RUN_CAMERA_AI_INFERENCE=1 RUN_ACTUATOR_BRIDGE=1 ./scripts/run_demo.sh` を追記。
+
+安全・インターフェースへの影響:
+
+- Arduino Uno Q の現場側状態機械が引き続き RELEASE_ON/OFF の最終 gate を持つ。
+- Pi bridge は安全CSVの `RELEASE_ON` を Arduino の `RELEASE` デモ入力に変換するだけで、
+  Arduino 側の release timeout / cooldown / ERROR_SAFE を迂回しない。
+- bridge は明示的に `RUN_ACTUATOR_BRIDGE=1` を指定した時だけ起動する。
+- 欠損、stale、ERROR_SAFE、emergency stop、例外時は `STOP` または no-release。
+
+検証:
+
+- `arduino-cli lib install Servo` → Servo 1.3.0 installed
+- `arduino-cli compile --fqbn arduino:avr:uno arduino_uno_q/contact_pad_controller`
+  → OK (direct servo mode, 10156 bytes / SRAM 1239 bytes)
+- `arduino-cli compile --fqbn arduino:avr:uno --build-property
+  compiler.cpp.extra_flags=-DGODA_ACTUATOR_MODE=1 arduino_uno_q/contact_pad_controller`
+  → OK (PCA9685 mode, 14212 bytes / SRAM 1433 bytes)
+- `bash -n scripts/run_demo.sh` → OK
+- `.venv/bin/python -m py_compile raspberry_pi/integration/safety_to_actuator.py
+  raspberry_pi/camera_ai/run_camera_ai.py raspberry_pi/camera_ai/bear_detector.py` → OK
+- `.venv/bin/python -m pytest` → 57 passed
+- `timeout 4 env RUN_CAMERA_AI=0 RUN_SAFETY_CONTROL=1 SAFETY_INPUT_MODE=scenario
+  RUN_ACTUATOR_BRIDGE=1 ACTUATOR_BRIDGE_NO_SERIAL=1 RUN_DASHBOARD=0 ./scripts/run_demo.sh`
+  → 起動確認 OK、timeout 終了コード 124 は想定通り
+
+結果:
+
+- 会場用に「Camera AI / safety CSV / Arduino serial / servo mechanism」の経路を
+  1コマンドで起動できるようになった。
+- 実機シリアルなしの no-serial bridge では startup `STOP` ログを確認。
+
+残課題:
+
+- Arduino IDE または `arduino-cli upload` で direct servo 版スケッチを Uno Q に書き込む。
+- `models/yolo_bear.onnx` が Pi に無い場合は、修正済み Colab notebook で生成して配置する。
+- 実機接続後、`RUN_CAMERA_AI_INFERENCE=1 RUN_ACTUATOR_BRIDGE=1 ./scripts/run_demo.sh` を起動し、
+  `data/logs/camera_ai.status.log`, `feeding_decision_log.csv`,
+  `actuator_bridge.status.log` を見ながら `ai_model_ok=true` と機構動作を確認する。

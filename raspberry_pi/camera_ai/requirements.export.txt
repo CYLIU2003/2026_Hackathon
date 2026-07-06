@@ -1,0 +1,9 @@
+# Export-only dependencies for Colab or a development PC.
+# Do not install this file on the Raspberry Pi runtime environment unless you
+# intentionally want the PyTorch/Ultralytics .pt fallback.
+ultralytics==8.3.40
+ultralytics-thop==2.0.9
+onnx==1.16.1
+onnxruntime==1.27.0
+onnxscript==0.5.7
+onnxslim==0.1.94

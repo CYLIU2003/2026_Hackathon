@@ -428,14 +428,18 @@ aarch64 build) segfaults inside `extract("out0")`, Camera AI dies immediately
 and the dashboard picture freezes on the last frame. You do **not** need to
 install PyTorch on the Pi: export `.pt` to ONNX in Colab and drop
 `models/yolo_bear.onnx` on the Pi. Camera AI then automatically prefers the
-ONNX + OpenCV `cv2.dnn` inference path (no NCNN, no Pi-side PyTorch install).
+ONNX Runtime inference path (no NCNN, no Pi-side PyTorch/Ultralytics install).
+The Raspberry Pi runtime file `raspberry_pi/camera_ai/requirements.txt`
+therefore includes `onnxruntime` but excludes PyTorch and Ultralytics. Use
+`raspberry_pi/camera_ai/requirements.export.txt` only in Colab or a development
+environment for training/export work.
 
-ONNX export flow (run in Colab; install nothing on the Pi):
+ONNX export flow (run in Colab; Pi only needs the runtime requirements):
 
 ```text
 1. Open notebooks/export_bear_yolo_onnx.ipynb
 2. Upload the repo's best.pt
-3. Run all cells to export models/yolo_bear.onnx (imgsz=256, opset=12, simplify)
+3. Run all cells to export models/yolo_bear.onnx (imgsz=256, opset 18; opset 12 only if conversion succeeds)
 4. Download yolo_bear.onnx and place it at models/yolo_bear.onnx on the Pi
 5. Re-run ./scripts/run_demo.sh on the Pi
 6. Confirm ai_model_ok=true and that the picture keeps updating
@@ -645,11 +649,23 @@ python -m pip install -r raspberry_pi/camera_ai/requirements.txt
 python -m pip install -r raspberry_pi/dashboard/requirements.txt
 ```
 
+The Camera AI runtime install is ONNX/NCNN-oriented and intentionally avoids
+PyTorch/Ultralytics on the Raspberry Pi.
+
 Normal demo startup, including Camera AI and the remote dashboard:
 
 ```bash
 ./scripts/run_demo.sh
 ```
+
+Full venue path with live camera inference and Arduino actuator bridge:
+
+```bash
+RUN_CAMERA_AI_INFERENCE=1 RUN_ACTUATOR_BRIDGE=1 ./scripts/run_demo.sh
+```
+
+The bridge sends Arduino `RELEASE` only from a fresh `RELEASE_ON` safety CSV row;
+missing/stale/error data sends or keeps `STOP`.
 
 Open this from another PC, tablet, or phone on the same network, or through Tailscale:
 

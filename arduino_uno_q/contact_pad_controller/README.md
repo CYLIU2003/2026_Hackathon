@@ -1,7 +1,11 @@
 # 前足接触パッド制御装置 - 動作確認手順書
 
 このファイルは **郷田さん** が、ラズパイ（画像認識用）が無い環境でも
-Arduino + PCA9685 + サーボモーターの動作確認ができるように書かれています。
+Arduino + サーボモーターの動作確認ができるように書かれています。
+
+2026-07-06 時点の既定は、郷田さんの最新 `Haruka GODA/beehivemotorC++/0to90.ino`
+に合わせた **D3 直結サーボ** です。PCA9685 を使う場合だけ `config.h` の
+`GODA_ACTUATOR_MODE` を `GODA_ACTUATOR_MODE_PCA9685` に変更してください。
 
 プログラミングが得意でなくても大丈夫です。手順のとおりに進めてください。
 
@@ -25,11 +29,11 @@ Arduino + PCA9685 + サーボモーターの動作確認ができるように書
 | 品目 | 個数 | 補足 |
 |---|---|---|
 | Arduino Uno（または Uno Q） | 1台 | USBケーブル付き |
-| PCA9685 サーボドライバ基板 | 1枚 | 16ch PWMドライバ |
 | サーボモーター（MG996R など） | 1個 | |
 | 外部電源（5V〜6V, 2A以上） | 1個 | **Arduino からサーボに給電しないこと** |
 | ジャンパーワイヤー（オス-メス） | 数本 | |
 | パソコン（Windows / Mac どちらでも） | 1台 | Arduino IDE を入れる |
+| PCA9685 サーボドライバ基板 | 任意 | PCA9685 配線で使う場合だけ |
 
 ---
 
@@ -44,7 +48,10 @@ Arduino + PCA9685 + サーボモーターの動作確認ができるように書
 
 ### 手順 2：ライブラリを入れる（1回だけ）
 
-Arduino IDE のメニューから：
+D3 直結サーボの既定設定では、Arduino 標準の `Servo` ライブラリを使うため
+追加ライブラリは不要です。
+
+PCA9685 を使う場合だけ、Arduino IDE のメニューから：
 
 1. 左の本マーク（Library Manager）をクリック
 2. 検索窓に `Adafruit PWM Servo` と入力
@@ -56,7 +63,25 @@ Arduino IDE のメニューから：
 **重要：サーボは Arduino の 5V ピンから直接給電しないでください。**
 サーボの電流が大きすぎて Arduino が壊れることがあります。
 
-#### 3-A. Arduino Uno と PCA9685 をつなぐ
+#### 3-A. 既定: Arduino Uno とサーボを直接つなぐ
+
+郷田さんの `0to90.ino` と同じ配線です。
+
+| サーボの線 | Arduino / 電源 |
+|---|---|
+| 信号線（オレンジ/黄/白） | D3 (`PIN_GODA_DIRECT_SERVO`) |
+| 電源＋（赤） | 外部 5V〜6V 電源の + |
+| GND（茶/黒） | 外部電源 GND + Arduino GND |
+
+**Arduino の GND と外部電源 GND は必ず共通化してください。**
+
+#### 3-B. PCA9685 を使う場合だけ Arduino Uno と PCA9685 をつなぐ
+
+PCA9685 配線を使う場合は `config.h` を次のように変更します。
+
+```cpp
+const int GODA_ACTUATOR_MODE = GODA_ACTUATOR_MODE_PCA9685;
+```
 
 | PCA9685 側 | Arduino Uno 側 |
 |---|---|
@@ -65,7 +90,7 @@ Arduino IDE のメニューから：
 | SDA | A4 |
 | SCL | A5 |
 
-#### 3-B. PCA9685 とサーボモーターをつなぐ
+#### 3-C. PCA9685 とサーボモーターをつなぐ
 
 | サーボの線 | PCA9685 側（CH0 = 0番） |
 |---|---|
@@ -73,14 +98,14 @@ Arduino IDE のメニューから：
 | 電源＋（赤） | CH0 の V+ |
 | GND（茶/黒） | CH0 の GND |
 
-#### 3-C. 外部電源と PCA9685 をつなぐ
+#### 3-D. 外部電源と PCA9685 をつなぐ
 
 | 外部電源 | PCA9685 側 |
 |---|---|
 | ＋（赤） | 端子台の V+ |
 | −（黒） | 端子台の GND |
 
-#### 3-D. GND 共通化（とても大事！）
+#### 3-E. GND 共通化（とても大事！）
 
 **Arduino の GND と PCA9685（外部電源）の GND をつなぐのを忘れないでください。**
 
@@ -93,7 +118,7 @@ Arduino GND ──── PCA9685 GND
 
 > 3本の GND がつながっている状態が正解です。
 
-#### 3-E. BIAセンサーを使う場合だけ追加でつなぐ
+#### 3-F. BIAセンサーを使う場合だけ追加でつなぐ
 
 通常のデモではここは不要です。今の初期設定は **BIAなしのシミュレーション入力** です。
 
@@ -144,7 +169,7 @@ USB ケーブルで Arduino をパソコンに接続します。
 シリアルモニタに次のような文字が流れ始めます：
 
 ```
-{"timestamp":"T+1234ms","state":"IDLE","event":"BOOT","release_state":"RELEASE_OFF","actuator_open":false,...}
+{"timestamp":"T+1234ms","state":"IDLE","event":"BOOT","release_state":"RELEASE_OFF","actuator_open":false,"actuator_mode":"DIRECT_SERVO",...}
 ```
 
 これで Arduino は正常に動いています。
@@ -185,10 +210,10 @@ USB ケーブルで Arduino をパソコンに接続します。
 
 ### サーボがまったく動かない
 
-1. **外部電源は入っていますか？** — PCA9685 の端子台に 5V〜6V が来ているか確認
+1. **外部電源は入っていますか？** — サーボ電源に 5V〜6V が来ているか確認
 2. **GND は共通化されていますか？** — Arduino GND と外部電源 GND がつながっているか確認
-3. **配線が正しいか？** — SDA=A4, SCL=A5 に刺さっているか確認
-4. **ライブラリは入っていますか？** — 「手順2」をやり直してみる
+3. **配線が正しいか？** — 既定では信号線が D3 に刺さっているか確認
+4. **PCA9685設定の場合だけ** — SDA=A4, SCL=A5 と Adafruit ライブラリを確認
 
 ### サーボがプルプル震える / 変な方向に回る
 
@@ -264,14 +289,20 @@ python3 raspberry_pi/integration/fake_bear_to_actuator.py --port /dev/ttyACM0 --
 [Arduino + 接触パッド制御]        ← ★ここが今の担当範囲★
        │
        ▼
-[PCA9685 + サーボ + ハチミツ機構]  ← 郷田さん担当
+[D3直結サーボ / PCA9685 + ハチミツ機構]  ← 郷田さん担当
 ```
 
 今は Raspberry Pi が無くても、Arduino が一人で演技してくれるので
 サーボ機構の動作確認ができます。
 
-実際の YOLO カメラが完成したら、Raspberry Pi 側を `fake_bear_to_actuator.py`
-から `run_camera_ai.py` に差し替えるだけで連携できます。
+実際の YOLO カメラで機構まで動かす場合は、Pi 側で次を使います。
+
+```bash
+RUN_CAMERA_AI_INFERENCE=1 RUN_ACTUATOR_BRIDGE=1 ./scripts/run_demo.sh
+```
+
+`safety_to_actuator.py` が `feeding_decision_log.csv` を監視し、`RELEASE_ON` の時だけ
+Arduino に `RELEASE` を送ります。欠損・古いログ・エラー時は `STOP` 側です。
 
 ---
 

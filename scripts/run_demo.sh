@@ -12,12 +12,14 @@ RUN_SAFETY_CONTROL="${RUN_SAFETY_CONTROL:-1}"
 SAFETY_INPUT_MODE="${SAFETY_INPUT_MODE:-camera}"
 RUN_SERIAL_LOGGER="${RUN_SERIAL_LOGGER:-0}"
 RUN_DASHBOARD="${RUN_DASHBOARD:-1}"
+RUN_ACTUATOR_BRIDGE="${RUN_ACTUATOR_BRIDGE:-0}"
+ACTUATOR_BRIDGE_NO_SERIAL="${ACTUATOR_BRIDGE_NO_SERIAL:-0}"
 MOCK_CONTACT="${MOCK_CONTACT:-1}"
 MOCK_IMPEDANCE_KOHM="${MOCK_IMPEDANCE_KOHM:-92.4}"
 HONEY_AMOUNT_PERCENT="${HONEY_AMOUNT_PERCENT:-80}"
 # Camera AI 推論 on/off。1=推論あり、0=カメラのみフェイルセーフ(HOLD)。
 # 既定は「配置されている推論モデルに応じた自動判定」:
-#  - models/yolo_bear.onnx があれば ONNX/cv2.dnn 推理が安定するので 1
+#  - models/yolo_bear.onnx があれば ONNX Runtime 推理が安定するので 1
 #  - なければ NCNN が segfault する環境を想定し 0（カメラのみ）
 # 明示的に切替えたい場合は RUN_CAMERA_AI_INFERENCE=1 / 0 を設定すること。
 if [[ -z "${RUN_CAMERA_AI_INFERENCE:-}" ]]; then
@@ -96,6 +98,21 @@ if [[ "${RUN_SERIAL_LOGGER}" == "1" ]]; then
     --baudrate "${BAUDRATE}" \
     --log-dir "${LOG_DIR}" \
     >> "${LOG_DIR}/serial_logger.status.log" 2>&1 &
+  child_pids+=("$!")
+fi
+
+if [[ "${RUN_ACTUATOR_BRIDGE}" == "1" ]]; then
+  echo "Starting safety-to-actuator bridge on ${SERIAL_PORT}..."
+  actuator_bridge_args=()
+  if [[ "${ACTUATOR_BRIDGE_NO_SERIAL}" == "1" ]]; then
+    actuator_bridge_args+=(--no-serial)
+  fi
+  "${PYTHON_BIN}" -m raspberry_pi.integration.safety_to_actuator \
+    --input "${LOG_DIR}/feeding_decision_log.csv" \
+    --port "${SERIAL_PORT}" \
+    --baudrate "${BAUDRATE}" \
+    "${actuator_bridge_args[@]}" \
+    >> "${LOG_DIR}/actuator_bridge.status.log" 2>&1 &
   child_pids+=("$!")
 fi
 

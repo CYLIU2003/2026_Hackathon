@@ -142,7 +142,7 @@ def resolve_model_candidates(
     if existing_candidates:
         # Prefer ONNX files over NCNN directories on platforms where the NCNN
         # native runtime segfaults. This lets a single dropped-in yolo_bear.onnx
-        # switch the system to the cv2.dnn ONNX backend automatically.
+        # switch the system to the ONNX Runtime backend automatically.
         def _priority(path: Path) -> int:
             if path.suffix.lower() == ".onnx":
                 return 0
