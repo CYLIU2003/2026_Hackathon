@@ -1,3 +1,3 @@
-timestamp,state,previous_state,event,bear_detected,paw_contact,contact_confirmed,raw_contact_value,honey_amount_percent,honey_enough,system_safe,emergency_stop,release_allowed,release_state,error_code,error_message
-T+0000ms,IDLE,IDLE,IDLE,false,false,false,,80,true,true,false,false,RELEASE_OFF,ERR_NONE,
-T+5000ms,RELEASING,READY_TO_RELEASE,RELEASE_START,true,true,true,,80,true,true,false,true,RELEASE_ON,ERR_NONE,
+timestamp,state,previous_state,event,bear_detected,paw_contact,contact_confirmed,raw_contact_value,contact_input_source,bia_input_enabled,bia_data_valid,bia_data_age_ms,bia_contact_detected,bia_phase1,bia_amplitude2,bia_phase2,honey_amount_percent,honey_enough,system_safe,emergency_stop,release_allowed,release_state,actuator_open,servo_angle,auto_test_mode,error_code,error_message
+T+0000ms,IDLE,IDLE,IDLE,false,false,false,,SIMULATED,false,false,,,,,,80,true,true,false,false,RELEASE_OFF,false,0,true,ERR_NONE,
+T+5000ms,RELEASING,READY_TO_RELEASE,RELEASE_START,true,true,true,,SIMULATED,false,false,,,,,,80,true,true,false,true,RELEASE_ON,true,90,true,ERR_NONE,

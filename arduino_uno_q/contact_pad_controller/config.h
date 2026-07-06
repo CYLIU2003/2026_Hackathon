@@ -7,6 +7,8 @@ const int PIN_RELEASE_SIGNAL = 8;
 const int PIN_EMERGENCY_STOP = 7;
 const int PIN_SIM_BEAR_INPUT = 2;
 const int PIN_SIM_CONTACT_INPUT = 3;
+const int PIN_BIA_SERIAL_RX = 4;
+const int PIN_BIA_SERIAL_TX_UNUSED = 5;
 const int PIN_CONTACT_ANALOG = A0;
 const int PIN_HONEY_ANALOG = A1;
 const int PIN_STATUS_LED = 12;
@@ -18,6 +20,12 @@ const unsigned long COOLDOWN_AFTER_RELEASE_MS = 5000;
 const unsigned long MESSAGE_INTERVAL_MS = 1000;
 const unsigned long SENSOR_UPDATE_INTERVAL_MS = 100;
 const int SERIAL_BAUDRATE = 115200;
+
+#define BIA_INPUT_ENABLED 0
+#define BIA_USE_HARDWARE_SERIAL1 0
+const int BIA_SERIAL_BAUDRATE = 9600;
+const unsigned long BIA_INPUT_TIMEOUT_MS = 1500;
+const int BIA_MESSAGE_BUFFER_SIZE = 220;
 
 const int DEFAULT_HONEY_AMOUNT_PERCENT = 80;
 

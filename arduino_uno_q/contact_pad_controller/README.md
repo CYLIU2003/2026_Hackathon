@@ -93,6 +93,21 @@ Arduino GND ──── PCA9685 GND
 
 > 3本の GND がつながっている状態が正解です。
 
+#### 3-E. BIAセンサーを使う場合だけ追加でつなぐ
+
+通常のデモではここは不要です。今の初期設定は **BIAなしのシミュレーション入力** です。
+
+BIAを使う場合は `config.h` の `BIA_INPUT_ENABLED` を `1` に変更してから、
+以下を追加でつなぎます。
+
+| ESP32 BIA 側 | Arduino Uno 側 |
+|---|---|
+| GPIO16 TX | D4 (`PIN_BIA_SERIAL_RX`) |
+| GND | GND |
+
+通信は ESP32 → Arduino の片方向、9600 baud です。BIAデータが来ない、古い、
+または壊れている場合、Arduino は `ERROR_SAFE` に入り、サーボは閉じたままです。
+
 ### 手順 4：スケッチを開く
 
 1. Arduino IDE でメニュー → **File** → **Open...**

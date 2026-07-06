@@ -45,7 +45,7 @@ Error path:
 
 ```text
 ANY_STATE
-  ↓ emergency_stop / invalid input / internal error
+  ↓ emergency_stop / invalid input / BIA timeout / bad BIA message / internal error
 ERROR_SAFE
   ↓ RESET command
 IDLE
@@ -55,6 +55,8 @@ Rules:
 - In `ERROR_SAFE`, `release_state` must be `RELEASE_OFF`.
 - If `emergency_stop` is true at any time, transition to `ERROR_SAFE`.
 - If `honey_amount_percent` is outside 0-100, transition to `ERROR_SAFE`.
+- If BIA UART input is enabled and data is missing, stale, too long, or
+  malformed, transition to `ERROR_SAFE`.
 - `ERROR_SAFE` must not clear automatically; it only leaves on `RESET`.
 - The Raspberry Pi demo mirror may issue a software reset after healthy Camera
   AI data returns. This does not reset or command the Arduino controller.

@@ -18,6 +18,9 @@ data/datasets/
 # under models/ instead.
 a1_camera_ai_colab_artifacts*.zip
 best.pt
+
+# Arduino build output
+build/
 args.yaml
 results.csv
 

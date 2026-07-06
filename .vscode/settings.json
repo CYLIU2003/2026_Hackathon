@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "*.ino": "cpp"
+    },
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/**"
+    ],
+    "arduino.useArduinoCli": true,
+    "arduino.commandPath": "/home/rpi1/.local/bin/arduino-cli",
+    "arduino.additionalUrls": [],
+    "arduino.enableUSBDetection": true,
+    "arduino.disableIntelliSenseAutoGen": true
+}

@@ -52,6 +52,26 @@ Candidates:
 - none
 ```
 
+### Optional Sensor Submodule
+
+An optional sensor submodule can provide contact evidence to the Edge
+Controller, but it does not own the release decision.
+
+Current candidate:
+
+```text
+- ESP32 BIA measurement sketch
+```
+
+Rules:
+
+```text
+- Arduino Uno Q remains the authoritative safety controller.
+- ESP32 BIA output is treated as an input signal only.
+- If BIA data is stale or malformed while BIA mode is enabled, the controller
+  must hold RELEASE_OFF and enter ERROR_SAFE.
+```
+
 ---
 
 ## 2. Target: `uno_q`
@@ -123,12 +143,34 @@ Use this when ESP32 controls the pad and Raspberry Pi logs/displays data.
 
 ---
 
+## 5.1 Target: `uno_q_plus_esp32_bia_plus_raspberry_pi`
+
+```json
+{
+  "hardware_target": "uno_q_plus_esp32_bia_plus_raspberry_pi",
+  "edge_controller": "arduino_uno_q",
+  "sensor_submodule": "esp32_bia",
+  "host_device": "raspberry_pi_4b",
+  "communication_backend": "serial_usb",
+  "sensor_backend": "uart_jsonl",
+  "use_simulated_inputs": false,
+  "enable_bia_input": true,
+  "enable_dashboard": true
+}
+```
+
+Use this when Arduino Uno Q controls the release state machine, ESP32 provides
+BIA contact evidence over UART, and Raspberry Pi logs/displays Arduino output.
+
+---
+
 ## 6. Comparison
 
 | Target | Edge Controller | Host Device | Logging | Dashboard | Complexity |
 |---|---|---|---|---|---:|
 | `uno_q` | Arduino Uno Q | none | serial only | no | low |
 | `uno_q_plus_raspberry_pi` | Arduino Uno Q | Raspberry Pi 4B | CSV | yes | medium |
+| `uno_q_plus_esp32_bia_plus_raspberry_pi` | Arduino Uno Q + ESP32 BIA input | Raspberry Pi 4B | CSV | yes | medium-high |
 | `esp32` | ESP32 | none | serial only | optional Wi-Fi | low |
 | `esp32_plus_raspberry_pi` | ESP32 | Raspberry Pi 4B | CSV | yes | medium |
 

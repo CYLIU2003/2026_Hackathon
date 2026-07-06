@@ -3,6 +3,15 @@
 #include <Adafruit_PWMServoDriver.h>
 #include "config.h"
 
+#if BIA_INPUT_ENABLED
+#if BIA_USE_HARDWARE_SERIAL1
+#define bia_serial Serial1
+#else
+#include <SoftwareSerial.h>
+SoftwareSerial bia_serial(PIN_BIA_SERIAL_RX, PIN_BIA_SERIAL_TX_UNUSED);
+#endif
+#endif
+
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(GODA_PCA9685_I2C_ADDRESS);
 
 int current_servo_angle = GODA_SERVO_CLOSED_ANGLE;
@@ -45,6 +54,14 @@ bool reset_requested = false;
 bool auto_test_mode = true;
 bool demo_command_active = false;
 
+bool bia_data_valid = false;
+bool bia_contact_detected = false;
+float bia_amplitude1 = 0.0f;
+float bia_phase1 = 0.0f;
+float bia_amplitude2 = 0.0f;
+float bia_phase2 = 0.0f;
+const char *contact_input_source = "SIMULATED";
+
 int simulation_step = 0;
 unsigned long simulation_step_started_at_ms = 0;
 
@@ -55,10 +72,13 @@ unsigned long release_started_at_ms = 0;
 unsigned long cooldown_started_at_ms = 0;
 unsigned long last_message_sent_at_ms = 0;
 unsigned long last_sensor_update_at_ms = 0;
+unsigned long last_bia_message_received_at_ms = 0;
 
 const unsigned long SIMULATION_STEP_DURATION_MS = 5000;
 char serial_command_buffer[80];
 int serial_command_length = 0;
+char bia_message_buffer[BIA_MESSAGE_BUFFER_SIZE];
+int bia_message_length = 0;
 
 int angle_to_pulse(int angle) {
   angle = constrain(angle, 0, 180);
@@ -153,6 +173,151 @@ void request_reset() {
 void clear_serial_command_buffer() {
   serial_command_length = 0;
   serial_command_buffer[0] = '\0';
+}
+
+void clear_bia_message_buffer() {
+  bia_message_length = 0;
+  bia_message_buffer[0] = '\0';
+}
+
+const char *find_json_value(const char *message, const char *key) {
+  const char *key_position = strstr(message, key);
+  if (key_position == NULL) {
+    return NULL;
+  }
+
+  const char *colon_position = strchr(key_position, ':');
+  if (colon_position == NULL) {
+    return NULL;
+  }
+
+  const char *value_position = colon_position + 1;
+  while (*value_position == ' ') {
+    value_position++;
+  }
+  return value_position;
+}
+
+bool parse_json_bool(const char *message, const char *key, bool &value) {
+  const char *value_position = find_json_value(message, key);
+  if (value_position == NULL) {
+    return false;
+  }
+
+  if (strncmp(value_position, "true", 4) == 0) {
+    value = true;
+    return true;
+  }
+
+  if (strncmp(value_position, "false", 5) == 0) {
+    value = false;
+    return true;
+  }
+
+  return false;
+}
+
+bool parse_json_float(const char *message, const char *key, float &value) {
+  const char *value_position = find_json_value(message, key);
+  if (value_position == NULL) {
+    return false;
+  }
+
+  char *end_position = NULL;
+  double parsed_value = strtod(value_position, &end_position);
+  if (end_position == value_position) {
+    return false;
+  }
+
+  value = static_cast<float>(parsed_value);
+  return true;
+}
+
+bool parse_bia_message(const char *message) {
+  bool next_contact_detected = false;
+  float next_amplitude1 = 0.0f;
+  float next_phase1 = 0.0f;
+  float next_amplitude2 = 0.0f;
+  float next_phase2 = 0.0f;
+
+  if (!parse_json_bool(message, "\"contact_detected\"", next_contact_detected)) {
+    return false;
+  }
+
+  if (!parse_json_float(message, "\"amplitude1\"", next_amplitude1)) {
+    return false;
+  }
+
+  parse_json_float(message, "\"phase1\"", next_phase1);
+  parse_json_float(message, "\"amplitude2\"", next_amplitude2);
+  parse_json_float(message, "\"phase2\"", next_phase2);
+
+  if (next_amplitude1 < 0.0f) {
+    return false;
+  }
+
+  bia_contact_detected = next_contact_detected;
+  bia_amplitude1 = next_amplitude1;
+  bia_phase1 = next_phase1;
+  bia_amplitude2 = next_amplitude2;
+  bia_phase2 = next_phase2;
+  bia_data_valid = true;
+  last_bia_message_received_at_ms = current_time_ms;
+  return true;
+}
+
+bool bia_input_timed_out() {
+  if (!BIA_INPUT_ENABLED) {
+    return false;
+  }
+
+  if (!bia_data_valid) {
+    return current_time_ms >= BIA_INPUT_TIMEOUT_MS;
+  }
+
+  return current_time_ms - last_bia_message_received_at_ms > BIA_INPUT_TIMEOUT_MS;
+}
+
+void process_bia_message(char *message) {
+  if (!parse_bia_message(message)) {
+    bia_data_valid = false;
+    set_error("ERR_BIA_BAD_MESSAGE", "invalid BIA JSON line");
+    enter_state(ERROR_SAFE, "BIA_BAD_MESSAGE");
+  }
+}
+
+void process_bia_serial() {
+#if BIA_INPUT_ENABLED
+  if (!BIA_INPUT_ENABLED) {
+    return;
+  }
+
+  while (bia_serial.available() > 0) {
+    char incoming = static_cast<char>(bia_serial.read());
+
+    if (incoming == '\r') {
+      continue;
+    }
+
+    if (incoming == '\n') {
+      if (bia_message_length > 0) {
+        bia_message_buffer[bia_message_length] = '\0';
+        process_bia_message(bia_message_buffer);
+        clear_bia_message_buffer();
+      }
+      continue;
+    }
+
+    if (bia_message_length < BIA_MESSAGE_BUFFER_SIZE - 1) {
+      bia_message_buffer[bia_message_length++] = incoming;
+    } else {
+      bia_data_valid = false;
+      clear_bia_message_buffer();
+      set_error("ERR_BIA_MESSAGE_TOO_LONG", "BIA message exceeded buffer");
+      enter_state(ERROR_SAFE, "BIA_MESSAGE_TOO_LONG");
+    }
+  }
+#endif
 }
 
 void set_manual_input(const char *key, int value) {
@@ -420,9 +585,23 @@ void update_confirmed_contact() {
 
 void update_inputs() {
   bear_detected = simulated_bear_detected;
-  paw_contact = simulated_paw_contact;
   honey_amount_percent = simulated_honey_amount_percent;
   system_safe = simulated_system_safe;
+
+  if (BIA_INPUT_ENABLED) {
+    contact_input_source = "BIA_UART";
+    paw_contact = false;
+
+    if (bia_input_timed_out()) {
+      set_error("ERR_BIA_TIMEOUT", "BIA input missing or stale");
+      enter_state(ERROR_SAFE, "BIA_TIMEOUT");
+    } else if (bia_data_valid) {
+      paw_contact = bia_contact_detected;
+    }
+  } else {
+    contact_input_source = "SIMULATED";
+    paw_contact = simulated_paw_contact;
+  }
 
   update_confirmed_contact();
   honey_enough = honey_amount_percent >= HONEY_MIN_THRESHOLD_PERCENT;
@@ -526,6 +705,30 @@ void print_bool(bool value) {
   Serial.print(value ? F("true") : F("false"));
 }
 
+void print_nullable_bool(bool has_value, bool value) {
+  if (has_value) {
+    print_bool(value);
+  } else {
+    Serial.print(F("null"));
+  }
+}
+
+void print_nullable_unsigned_long(bool has_value, unsigned long value) {
+  if (has_value) {
+    Serial.print(value);
+  } else {
+    Serial.print(F("null"));
+  }
+}
+
+void print_raw_contact_value() {
+  if (BIA_INPUT_ENABLED && bia_data_valid) {
+    Serial.print(bia_amplitude1, 3);
+  } else {
+    Serial.print(F("null"));
+  }
+}
+
 void print_nullable_string(const char *value) {
   if (value == NULL) {
     Serial.print(F("null"));
@@ -551,7 +754,36 @@ void emit_json_line() {
   print_bool(paw_contact);
   Serial.print(F(",\"contact_confirmed\":"));
   print_bool(contact_confirmed);
-  Serial.print(F(",\"raw_contact_value\":null"));
+  Serial.print(F(",\"raw_contact_value\":"));
+  print_raw_contact_value();
+  Serial.print(F(",\"contact_input_source\":\""));
+  Serial.print(contact_input_source);
+  Serial.print(F("\",\"bia_input_enabled\":"));
+  print_bool(BIA_INPUT_ENABLED);
+  Serial.print(F(",\"bia_data_valid\":"));
+  print_bool(BIA_INPUT_ENABLED && bia_data_valid && !bia_input_timed_out());
+  Serial.print(F(",\"bia_data_age_ms\":"));
+  print_nullable_unsigned_long(BIA_INPUT_ENABLED && bia_data_valid, current_time_ms - last_bia_message_received_at_ms);
+  Serial.print(F(",\"bia_contact_detected\":"));
+  print_nullable_bool(BIA_INPUT_ENABLED && bia_data_valid, bia_contact_detected);
+  Serial.print(F(",\"bia_phase1\":"));
+  if (BIA_INPUT_ENABLED && bia_data_valid) {
+    Serial.print(bia_phase1, 3);
+  } else {
+    Serial.print(F("null"));
+  }
+  Serial.print(F(",\"bia_amplitude2\":"));
+  if (BIA_INPUT_ENABLED && bia_data_valid) {
+    Serial.print(bia_amplitude2, 3);
+  } else {
+    Serial.print(F("null"));
+  }
+  Serial.print(F(",\"bia_phase2\":"));
+  if (BIA_INPUT_ENABLED && bia_data_valid) {
+    Serial.print(bia_phase2, 3);
+  } else {
+    Serial.print(F("null"));
+  }
   Serial.print(F(",\"honey_amount_percent\":"));
   Serial.print(honey_amount_percent);
   Serial.print(F(",\"honey_enough\":"));
@@ -599,11 +831,17 @@ void setup() {
   pinMode(PIN_STATUS_LED, OUTPUT);
 
   Serial.begin(SERIAL_BAUDRATE);
+#if BIA_INPUT_ENABLED
+  if (BIA_INPUT_ENABLED) {
+    bia_serial.begin(BIA_SERIAL_BAUDRATE);
+  }
+#endif
 
   current_time_ms = millis();
   state_entered_at_ms = current_time_ms;
   simulation_step_started_at_ms = current_time_ms;
   clear_serial_command_buffer();
+  clear_bia_message_buffer();
   init_release_actuator();
 
   update_inputs();
@@ -614,6 +852,7 @@ void setup() {
 void loop() {
   current_time_ms = millis();
   process_serial_commands();
+  process_bia_serial();
 
   if (current_time_ms - last_sensor_update_at_ms >= SENSOR_UPDATE_INTERVAL_MS) {
     last_sensor_update_at_ms = current_time_ms;

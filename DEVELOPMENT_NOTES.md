@@ -583,6 +583,151 @@ USB Camera
 - Raspberry Pi実機で `/dev/ttyACM0` 接続、Tailscale経由アクセス、Arduino実機の
   `RELEASE` / `STOP` / `TEST` 受信を確認する。
 
+### 2026-07-04T21:56:00+09:00 — NCNNネイティブ推論への移行（ultralytics非依存化）
+
+担当: LIU Chengyang / 刘承洋_C.Y.LIU
+
+目的:
+
+Raspberry Pi 4B で `ultralytics`（PyTorch依存）が `Illegal instruction` を
+引き起こしていた問題を解決し、`models/yolo_bear_ncnn_model` を用いた
+NCNNネイティブ推論を `YoloBearDetector` のプライマリバックエンドとする。
+
+変更ファイル:
+
+- `raspberry_pi/camera_ai/bear_detector.py`
+
+変更内容:
+
+- `YoloBearDetector.__init__` でモデルパスが NCNN ディレクトリ（`*.ncnn.param`
+  を含む）か `.pt` ファイルかを自動判定するよう変更。
+- NCNN バックエンド (`_init_ncnn`, `_detect_ncnn`) を新規追加。
+  - `ncnn.Mat.from_pixels_resize` + `substract_mean_normalize` で前処理。
+  - `ncnn.Net` + `create_extractor` で推論実行。
+  - 出力 `(5, 1344)` = `[cx, cy, w, h, class_score]` を xyxy 形式に変換し、
+    元フレーム寸法にスケーリング。
+- Ultralytics バックエンド (`_init_ultralytics`, `_detect_ultralytics`) を
+  fallback として保持（`.pt` ファイル用）。
+- `metadata.yaml` からクラス名を読み込む `_load_metadata_class_names` を追加。
+- `_check_runtime_dependency`, `_ensure_backend_ready` を削除（バックエンド
+  分離により不要になったため）。
+
+安全・インターフェースへの影響:
+
+- 外部インターフェース (`detect()` の入出力形式) に変更なし。
+- NCNN モデル使用時は `ultralytics` / PyTorch のインストール不要。
+- detection dict の `bbox_xyxy` はクランプ処理追加によりフレーム範囲外に
+  ならないことを保証。
+
+検証:
+
+- `python -c "from raspberry_pi.camera_ai.bear_detector import YoloBearDetector;
+  d = YoloBearDetector('models/yolo_bear_ncnn_model'); print(d._backend)"`
+  → `ncnn`
+- ダミーフレーム (480x640 黒背景 + 赤矩形) で 10 件の検出を確認。
+- 実カメラ (`/dev/video0`, 1920x1080) で 9 件の検出を確認。
+- `python -m raspberry_pi.camera_ai.run_camera_ai --device /dev/video0
+  --terminal-status --no-jsonl --once --save-debug-frames`
+  → `event=AI_NO_BEAR camera=ok model=ok infer_ms=117.9`
+- `./scripts/run_demo.sh` で Camera AI + Safety Controller + Dashboard が
+  すべて起動し、CSVログ・debug frame が正常生成されることを確認。
+
+結果:
+
+- Camera AI が NCNN で正常動作 (推論 ~87-117ms)。
+- Safety Controller が ERROR_SAFE → IDLE に復帰 (event=RESET)。
+- Dashboard が HTTP 200 で応答、`/camera/latest.jpg` が生成。
+- `data/logs/feeding_decision_log.csv` に safety decision が記録。
+
+残課題:
+
+- 実機で熊（または熊の画像）をカメラに映し、`AI_BEAR_DETECTED` →
+  `AI_BEAR_APPROACHING` の状態遷移を確認する。
+- アノテーション付き debug frame に検出枠が描画されているか目視確認する。
+
+### 2026-07-05T13:53:05+09:00 — ESP32 BIA入力とUno安全状態機械の統合
+
+担当: Codex
+
+目的:
+
+未コミット作業のファイル更新時刻に基づく記録。ESP32上のBIA測定スケッチを
+Arduino Unoの前足接触入力として接続できるようにし、既存のサーボ付き
+`contact_pad_controller` の安全状態機械へBIA接触判定を合流させる。
+
+変更ファイル:
+
+- `sensor/BIA.ino`
+- `sensor/README.md`
+- `arduino_uno_q/contact_pad_controller/config.h`
+- `arduino_uno_q/contact_pad_controller/contact_pad_controller.ino`
+- `arduino_uno_q/README.md`
+- `arduino_uno_q/contact_pad_controller/README.md`
+- `raspberry_pi/logger/serial_logger.py`
+- `docs/interface_spec.md`
+- `docs/block_diagram.md`
+- `docs/state_machine.md`
+- `HARDWARE_TARGETS.md`
+- `examples/sample_uno_q_output.jsonl`
+- `examples/sample_log.csv`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- ESP32 BIAスケッチに `contact_detected` 判定、USB debug JSON Lines、
+  Arduino向けUART最小JSON Lines、`CALIBRATE` / `SET_THRESHOLD` / `STATUS`
+  コマンドを追加。
+- GPIO17は既存の `DDS2_CS` と衝突するため、ESP32 UART TXをGPIO16に設定。
+- Arduino Uno側に任意のBIA UART入力を追加。既定は
+  `#define BIA_INPUT_ENABLED 0` のままなので、従来のシミュレーションMVPは
+  変更なしで動作する。
+- BIA入力有効時は `contact_detected` を `paw_contact` 入力源として使い、
+  `amplitude1` を `raw_contact_value` としてRaspberry Piへ中継する。
+- BIAデータ欠損、タイムアウト、長すぎるメッセージ、不正JSONを
+  `ERROR_SAFE` / `RELEASE_OFF` に落とす処理を追加。
+- Raspberry Pi CSV loggerにBIA関連の任意列を追加。
+- インターフェース仕様、ブロック図、状態機械、ハードウェアターゲット、
+  Arduino/BIA手順、サンプルJSON/CSVを更新。
+
+安全・インターフェースへの影響:
+
+- Arduino Unoが引き続き最終リリース安全判断を持つ。
+- ESP32 BIAは接触入力サブモジュールであり、`RELEASE_ON/OFF` を直接決めない。
+- 既定状態はBIA無効・シミュレーション入力のまま。
+- BIA有効時に通信異常がある場合、`ERR_BIA_TIMEOUT` または
+  `ERR_BIA_BAD_MESSAGE` 系で `ERROR_SAFE` に入り、`RESET` まで復帰しない。
+- Uno -> Raspberry Pi JSON Linesに
+  `contact_input_source`, `bia_input_enabled`, `bia_data_valid`,
+  `bia_data_age_ms`, `bia_contact_detected`, `bia_phase1`,
+  `bia_amplitude2`, `bia_phase2` を任意フィールドとして追加。
+
+検証:
+
+- `python -m py_compile raspberry_pi/logger/serial_logger.py
+  raspberry_pi/dashboard/app.py` 成功。
+- `bash -n scripts/run_demo.sh` 成功。
+- `examples/sample_uno_q_output.jsonl` のJSON parse成功。
+- `examples/sample_log.csv` の列数整合確認成功 (`27` columns)。
+- `python -m pytest tests/test_dashboard.py tests/test_decision_logic.py -q` は
+  `No module named pytest` のため未実施。
+- `arduino-cli` / `arduino-lint` は環境になく、Arduino/ESP32実コンパイルは
+  未実施。
+
+結果:
+
+- BIAを使わない既定MVPでは、既存の自動シミュレーション、サーボ制御、
+  JSON Lines出力を維持する構成になった。
+- BIAを有効化した場合の接触入力経路、ログ列、安全フォールバック仕様を
+  コードと文書に反映した。
+
+残課題:
+
+- Arduino IDEまたは `arduino-cli` がある環境でUnoスケッチとESP32 BIAスケッチを
+  実コンパイルする。
+- 実配線で ESP32 GPIO16 TX -> Arduino D4 RX、GND共通、9600 baud の受信を確認する。
+- BIA閾値は模擬物または人の手による安全な低電圧・微小電流テストで調整し、
+  実動物では試験しない。
+
 ## 8. 今後追記用テンプレート
 
 ```markdown
