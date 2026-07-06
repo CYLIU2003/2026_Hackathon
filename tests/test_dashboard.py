@@ -76,10 +76,42 @@ def test_dashboard_serves_camera_ai_state_and_latest_frame(tmp_path):
     assert page_response.status_code == 200
     assert b"Camera AI View" in page_response.data
     assert b"Feeding Safety Decision" in page_response.data
+    assert page_response.data.index(b"Camera AI View") < page_response.data.index(
+        b"Feeding Safety Decision"
+    )
     assert b"AI_BEAR_DETECTED" in page_response.data
     assert b"RELEASE_OFF" in page_response.data
+    assert b"frame_brightness" in page_response.data
     assert frame_response.status_code == 200
     assert frame_response.mimetype == "image/jpeg"
+
+
+def test_dashboard_serves_camera_ai_mjpeg_stream(tmp_path):
+    log_dir = tmp_path / "logs"
+    frame_dir = tmp_path / "debug_frames"
+    camera_log = log_dir / "camera_ai_log.csv"
+    frame_path = frame_dir / "latest_camera_ai.jpg"
+    write_csv(camera_log, "timestamp,event", "2026-06-17T10:01:00+09:00,AI_NO_BEAR")
+    frame_dir.mkdir(parents=True)
+    frame_path.write_bytes(b"\xff\xd8stream-frame\xff\xd9")
+
+    app = create_app(
+        log_dir,
+        "",
+        1,
+        camera_log_file=str(camera_log),
+        debug_frame_dir=frame_dir,
+        camera_frame_file="latest_camera_ai.jpg",
+    )
+    response = app.test_client().get("/camera/stream.mjpg", buffered=False)
+    chunk = next(response.response)
+    response.close()
+
+    assert response.status_code == 200
+    assert response.mimetype == "multipart/x-mixed-replace"
+    assert b"--frame" in chunk
+    assert b"Content-Type: image/jpeg" in chunk
+    assert b"\xff\xd8stream-frame\xff\xd9" in chunk
 
 
 def test_dashboard_highlights_integrated_feeding_decision(tmp_path):

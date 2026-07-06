@@ -4,9 +4,15 @@
 
 ```text
 BUFFALO BSW500M USB Camera
+  - USB ID: 0411:02da
+  - /dev/video0: Video Capture
+  - /dev/video1: Metadata Capture, not used by OpenCV
   |
   v
 Raspberry Pi 4B camera_ai
+  |
+  +-- camera_capture.py: auto BSW500M video-node selection, OpenCV/V4L2 driver,
+  |   fallback profiles, read retry, reopen
   |
   +-- camera_test.py: verify capture and save one debug frame
   |
@@ -34,6 +40,7 @@ The camera AI support signal is separate from the Arduino Uno Q contact-pad rele
 Camera AI:
   - detect possible bear approach
   - prefer Pi-friendly exported YOLO formats such as NCNN
+  - keep camera driver/reopen logic separate from inference and dashboard code
   - publish ai_bear_approaching
   - fail safe to false on errors
 
@@ -64,7 +71,9 @@ The final release decision remains fail-safe and must still require contact conf
 ## Raspberry Pi 4B Lightweight Profile
 
 ```text
-camera capture: 320x240 MJPG at 10 fps
+camera capture: 320x240 MJPG at 5 fps
+camera device: auto -> BUFFALO BSW500M Video Capture node, usually /dev/video0
+camera recovery: 3 read failures or 3 sec dark frame -> safe reopen
 YOLO input_size: 256
 primary model: models/yolo_bear_ncnn_model
 fallback models:
@@ -72,7 +81,7 @@ fallback models:
   - models/yolo_bear.onnx
   - models/yolo_bear.pt
 inference interval: about 2.0 sec
-remote dashboard JPEG update interval: about 1.0 sec
+remote dashboard JPEG update interval: about 0.2 sec
 ```
 
 ## Runtime And Demo Paths

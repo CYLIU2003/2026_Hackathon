@@ -5,6 +5,7 @@ from pathlib import Path
 
 try:
     from .camera_capture import (
+        AUTO_CAMERA_DEVICE,
         DEFAULT_CAMERA_DEVICE,
         CameraProfile,
         actual_fourcc,
@@ -14,6 +15,7 @@ try:
     )
 except ImportError:
     from camera_capture import (
+        AUTO_CAMERA_DEVICE,
         DEFAULT_CAMERA_DEVICE,
         CameraProfile,
         actual_fourcc,
@@ -25,7 +27,7 @@ except ImportError:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Capture one test frame from /dev/video0 without starting YOLO."
+        description="Capture one test frame from the BSW500M video stream without starting YOLO."
     )
     parser.add_argument(
         "--camera",
@@ -35,8 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--device",
-        default=DEFAULT_CAMERA_DEVICE,
-        help="Linux video device path. Target hardware default is /dev/video0.",
+        default=AUTO_CAMERA_DEVICE,
+        help=(
+            "Linux video device path, or auto to pick BUFFALO BSW500M "
+            f"video capture node. Fallback default is {DEFAULT_CAMERA_DEVICE}."
+        ),
     )
     parser.add_argument("--backend", choices=["v4l2", "any"], default="v4l2")
     parser.add_argument("--width", type=int, default=640)

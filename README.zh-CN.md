@@ -116,8 +116,10 @@ Raspberry Pi 不应作为唯一的安全控制器。相机AI是额外的感知�
 BUFFALO BSW500M USB Web摄像头连接到 Raspberry Pi 4B。
 
 ```text
+- USB ID: 0411:02da
 - /dev/video0: 实际图像流设备
 - /dev/video1: metadata device，不能用于图像采集
+- 默认配置: device=auto，会优先选择 0411:02da 的 Video Capture 节点并跳过 metadata 节点
 - 推荐FourCC: 先MJPG，失败时fallback到YUYV
 - 推荐分辨率: 先640x480，失败时fallback到320x240
 ```
@@ -375,7 +377,8 @@ Arduino/contact-pad 侧移到 Raspberry Pi。
 ```text
 - 目标设备: Raspberry Pi 4B 4GB
 - 摄像头: BUFFALO BSW500M USB Web摄像头
-- 图像采集设备: /dev/video0
+- USB ID: 0411:02da
+- 图像采集设备: device=auto，目标Pi上会解析为 /dev/video0
 - metadata device: /dev/video1，不能用于采集
 - 优先模型路径: models/yolo_bear_ncnn_model
 - fallback模型路径: models/yolo_bear.pt
@@ -425,12 +428,15 @@ ONNX 导出流程（在 Colab 上执行，Pi 只需要 runtime requirements）�
 当 `models/yolo_bear.onnx` 存在时，`scripts/run_demo.sh` 默认会启用推理
 （`RUN_CAMERA_AI_INFERENCE` 自动为 1）。没有 ONNX 时默认进入相机仅
 故障安全模式（`ai_model_ok=false`、保持 HOLD、画面仍持续更新）。
+`scripts/run_demo.sh` 的默认 `CAMERA_DEVICE=auto`，会在启动时选择
+BUFFALO BSW500M 的 Video Capture 节点；如果现场需要固定设备，也可以使用
+`CAMERA_DEVICE=/dev/video0 ./scripts/run_demo.sh`。
 
 Camera AI 运行命令：
 
 ```bash
 python3 -m compileall -q raspberry_pi/camera_ai
-python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
+python3 raspberry_pi/camera_ai/camera_test.py --device auto
 python3 -m raspberry_pi.camera_ai.run_camera_ai --terminal-status --no-jsonl --once
 ```
 
@@ -549,7 +555,7 @@ Camera AI is an additional perception layer, not the only safety controller.
 
 ```text
 - 蜂巢机构侧可以接收简单的 RELEASE_ON/OFF 信号
-- Raspberry Pi 4B 使用 BUFFALO BSW500M 的 /dev/video0 进行图像采集
+- Raspberry Pi 4B 使用 BUFFALO BSW500M 的 `device=auto` 图像采集路径；目标Pi上为 /dev/video0
 - /dev/video1 是metadata，不能用于图像采集
 - 物理接触/电阻集成与 camera AI 分开保留
 - PCA9685 + 舵机 + 外部电源用于执行机构侧
@@ -564,7 +570,7 @@ Camera AI is an additional perception layer, not the only safety controller.
 ```text
 [ ] Uno Q 可以生成模拟输入
 [ ] Uno Q 可以判断 RELEASE_ON/OFF
-[ ] Raspberry Pi 可以从 /dev/video0 采集图像
+[ ] Raspberry Pi 可以通过 `device=auto` 从 BSW500M 采集图像
 [ ] Camera AI 可以输出故障安全的 ai_bear_approaching
 [ ] 通过LED或serial可以看到 RELEASE_ON/OFF
 [ ] Raspberry Pi 可以接收状态数据
@@ -674,7 +680,7 @@ Raspberry Pi 上的安全判断是发表和集成确认用的镜像，不直接�
 
 ```bash
 python -m raspberry_pi.camera_ai.run_camera_ai \
-  --device /dev/video0 \
+  --device auto \
   --terminal-status \
   --no-jsonl \
   --save-debug-frames
@@ -684,7 +690,7 @@ python -m raspberry_pi.camera_ai.run_camera_ai \
 
 ```bash
 python -m raspberry_pi.camera_ai.run_camera_ai \
-  --device /dev/video0 \
+  --device auto \
   --terminal-status \
   --no-jsonl \
   --once \
@@ -694,7 +700,7 @@ python -m raspberry_pi.camera_ai.run_camera_ai \
 摄像头单体确认：
 
 ```bash
-python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
+python3 raspberry_pi/camera_ai/camera_test.py --device auto
 ```
 
 ### Raspberry Pi 仪表盘

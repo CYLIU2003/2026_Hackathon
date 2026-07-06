@@ -1,9 +1,12 @@
 camera:
-  device: "/dev/video0"
+  device: "auto"
+  model: "BUFFALO BSW500M"
+  preferred_usb_vendor_id: "0411"
+  preferred_usb_product_id: "02da"
   backend: "v4l2"
   width: 320
   height: 240
-  fps: 10
+  fps: 5
   fourcc: "MJPG"
   read_retries: 3
   retry_delay_sec: 0.1
@@ -36,7 +39,11 @@ output:
   save_debug_frames: true
   debug_frame_dir: "data/debug_frames"
   latest_debug_frame: "latest_camera_ai.jpg"
-  debug_frame_interval_sec: 1.0
+  debug_frame_interval_sec: 0.2
 
 fail_safe:
   default_ai_bear_approaching: false
+  dark_frame_mean_threshold: 30.0
+  dark_frame_recovery_sec: 3.0
+  camera_reopen_delay_sec: 1.0
+  max_consecutive_read_failures: 3

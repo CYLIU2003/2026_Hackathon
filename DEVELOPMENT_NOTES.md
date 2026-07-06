@@ -1,6 +1,6 @@
 # 開発ノート / Development Notes
 
-最終更新: 2026-07-06T11:22:08+09:00
+最終更新: 2026-07-06T13:49:14+09:00
 対象: A1 Bear Honey Buffet / Front Paw Contact Pad Safety Control System  
 タイムゾーン: Asia/Tokyo (UTC+09:00)
 
@@ -1281,3 +1281,508 @@ Colab のデフォルト Python 3.12 + torch 2.11 環境で `onnxscript` が
 - 実機接続後、`RUN_CAMERA_AI_INFERENCE=1 RUN_ACTUATOR_BRIDGE=1 ./scripts/run_demo.sh` を起動し、
   `data/logs/camera_ai.status.log`, `feeding_decision_log.csv`,
   `actuator_bridge.status.log` を見ながら `ai_model_ok=true` と機構動作を確認する。
+
+### 2026-07-06T11:22:08+09:00 — opset 18 ONNX Runtime 対応
+
+根拠: 未コミット差分とファイルシステム編集時刻。Gitコミット日時ではない。
+
+目的:
+
+- Colab export が `opset: 18`, input `images [1,3,256,256]`,
+  output `output0 [1,5,1344]` で成功した後、notebook の `opset <= 15`
+  アサートで失敗していた状態を解消する。
+- Raspberry Pi 側 Camera AI が opset 18 の `models/yolo_bear.onnx` を
+  `cv2.dnn` ではなく ONNX Runtime で実行できるようにする。
+
+変更ファイル:
+
+- `raspberry_pi/camera_ai/bear_detector.py`
+- `raspberry_pi/camera_ai/requirements.txt`
+- `raspberry_pi/camera_ai/run_camera_ai.py`
+- `raspberry_pi/camera_ai/README.md`
+- `tests/test_camera_ai_model_selection.py`
+- `notebooks/export_bear_yolo_onnx.ipynb`
+- `docs/camera_ai_interface_spec.md`
+- `README.md`, `README.ja.md`, `README.zh-CN.md`
+- `scripts/run_demo.sh`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- `.onnx` backend を OpenCV `cv2.dnn` から `onnxruntime.InferenceSession`
+  に変更し、CPUExecutionProvider で `images` 入力へ NCHW float32 tensor
+  `(1,3,256,256)` を渡すよう修正。
+- `output0` 形状 `(1,5,1344)` の YOLO 出力を既存の `[cx,cy,w,h,score]`
+  パースで検出辞書へ変換するテストを追加。
+- Pi runtime requirements に `onnxruntime==1.27.0` を追加し、
+  PyTorch/Ultralytics は引き続き runtime から除外。
+- notebook の検証セルを `opset <= 15` 失敗アサートから、入力/出力 contract
+  検証と ONNX Runtime 案内へ変更し、古い失敗出力をクリア。
+- README/仕様/デモコメントを ONNX Runtime + opset 18 前提へ更新。
+
+安全・インターフェースへの影響:
+
+- Arduino Uno Q の RELEASE_ON/OFF 判定、状態機械、JSON Lines/CSV interface は変更なし。
+- Camera AI は追加認識層のままで、蜂蜜放出の単独許可はしない。
+- ONNX Runtime またはモデルが欠落した場合は detector load error となり、
+  既存どおり `ai_model_ok=false` / HOLD 側に落ちる。
+
+検証:
+
+- `.venv/bin/python -m py_compile raspberry_pi/camera_ai/bear_detector.py
+  raspberry_pi/camera_ai/run_camera_ai.py` → OK
+- `.venv/bin/python -m pytest tests/test_camera_ai_model_selection.py` →
+  11 passed
+- `bash -n scripts/run_demo.sh` → OK
+- `python3 -m json.tool notebooks/export_bear_yolo_onnx.ipynb >/dev/null` → OK
+- `.venv/bin/python -m pytest` → 57 passed
+
+結果:
+
+- opset 18 ONNX export は正常な成果物として扱われるようになった。
+- `models/yolo_bear.onnx` 配置時の Pi runtime は ONNX Runtime backend に自動切替する。
+
+残課題:
+
+- Raspberry Pi 実機で `python -m pip install -r raspberry_pi/camera_ai/requirements.txt`
+  後、`models/yolo_bear.onnx` を配置して `./scripts/run_demo.sh` の
+  `ai_model_ok=true` と画面更新を確認する。
+
+### 2026-07-06T11:25:03+09:00 — 会場デバイス接続状況確認
+
+根拠: 未コミット差分とファイルシステム編集時刻。Gitコミット日時ではない。
+
+目的:
+
+- 会場の Raspberry Pi で、カメラ・Arduino・ONNX モデル配置の現在状態を確認する。
+
+変更ファイル:
+
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- 実機確認結果を開発ノートへ追記。
+
+安全・インターフェースへの影響:
+
+- 実装・インターフェース変更なし。
+- 現時点では Arduino シリアルが未検出のため、bridge は実機へ送信できない。
+- カメラ stream が protocol error のため、Camera AI は `AI_CAMERA_OPEN_ERROR` で安全側。
+
+検証:
+
+- `ls -l /dev/video*` → `/dev/video0` と `/dev/video1` を含む複数 video node を確認。
+- `lsusb` → BUFFALO USB 2.0 Camera (`0411:02da`) を確認。
+- `groups` → `video`, `dialout`, `gpio`, `i2c`, `spi` を含む。
+- `test -f models/yolo_bear.onnx` → 未配置。
+- `ls -l /dev/ttyACM* /dev/ttyUSB*` → Arduino serial 未検出。
+- `python -m raspberry_pi.camera_ai.run_camera_ai --device /dev/video0 --once`
+  → `AI_CAMERA_OPEN_ERROR`。
+- `v4l2-ctl --device=/dev/video0 --set-fmt-video=width=320,height=240,pixelformat=MJPG --stream-mmap --stream-count=5`
+  → `VIDIOC_STREAMON returned -1 (Protocol error)`。
+- `/dev/video1` は metadata capture で通常画像入力ではない。
+
+結果:
+
+- カメラデバイスは OS から見えているが、UVC stream 開始に失敗している。
+- Arduino は USB serial としてまだ見えていない。
+- ONNX Runtime 経路で使う `models/yolo_bear.onnx` はまだ Pi に無い。
+
+残課題:
+
+- USBカメラを抜き差し、別USBポート、外部給電USBハブ、または別カメラで
+  `v4l2-ctl --stream-count=5` が通る状態に戻す。
+- Arduino を接続し、`/dev/ttyACM0` などの `SERIAL_PORT` を確認する。
+- `models/yolo_bear.onnx` を配置してから
+  `RUN_CAMERA_AI_INFERENCE=1 RUN_ACTUATOR_BRIDGE=1 ./scripts/run_demo.sh` を再実行する。
+
+### 2026-07-06T11:35:40+09:00 — 会場デモ用 Camera AI 安定化
+
+根拠: 未コミット差分、ローカル実機検証、およびファイルシステム編集時刻。Gitコミット日時ではない。
+
+目的:
+
+- `./scripts/run_demo.sh` 実行中に NCNN native backend が segmentation fault する経路を避ける。
+- 会場の BUFFALO USB camera で安定して読める 320x240 MJPG 5fps を既定にし、
+  カメラ認識から安全判定ログまで通る状態に戻す。
+- Camera AI がクラッシュした場合でも、放出許可へ進まずカメラのみの
+  fail-safe mode へ戻せるようにする。
+
+変更ファイル:
+
+- `scripts/run_demo.sh`
+- `raspberry_pi/camera_ai/config.camera_ai.yaml`
+- `raspberry_pi/camera_ai/camera_capture.py`
+- `raspberry_pi/camera_ai/bear_detector.py`
+- `raspberry_pi/camera_ai/README.md`
+- `docs/camera_ai_design.md`
+- `DEVELOPMENT_NOTES.md`
+- `models/yolo_bear.onnx` (ローカル配置モデル、未追跡)
+
+変更内容:
+
+- `models/yolo_bear.onnx` が存在する場合、`run_demo.sh` が自動で
+  `CAMERA_AI_MODEL=models/yolo_bear.onnx` を指定して ONNX Runtime backend を使うようにした。
+- ONNX model 未指定時は NCNN を暗黙に選ばず、camera-only fail-safe mode へ落とすようにした。
+- Camera AI process が非ゼロ終了した場合、既定で `--no-inference` に再起動し、
+  demo 全体を止めずに HOLD 表示を維持できるようにした。
+- Camera AI の既定 fps を 10 から 5 に下げ、fallback profile に
+  320x240/640x480 の 5fps MJPG/YUYV を追加した。
+- ONNX Runtime session のログ severity を warning より上へ寄せた。
+- README と設計ドキュメントのカメラ既定値を 5fps に更新した。
+
+安全・インターフェースへの影響:
+
+- Arduino Uno Q の RELEASE_ON/OFF 判定、状態機械、serial/CSV interface は変更なし。
+- Camera AI は上位入力の一つであり、単独では放出許可を出さない。
+- AI model missing, camera missing, process crash, stale camera data は HOLD/RELEASE_OFF 側に落ちる。
+- Actuator bridge は `RUN_ACTUATOR_BRIDGE=1` の明示指定時のみ動く。
+
+検証:
+
+- `.venv/bin/python -m pip install -r raspberry_pi/camera_ai/requirements.txt`
+  → `onnxruntime==1.27.0` と OpenCV 4.10.0.84 runtime を導入。
+- `timeout 20 .venv/bin/python -m raspberry_pi.camera_ai.run_camera_ai --device /dev/video0 --model models/yolo_bear.onnx --terminal-status --no-jsonl --once --save-debug-frames`
+  → `selected_model=.../models/yolo_bear.onnx`, `camera=ok`, `model=ok`, `event=AI_NO_BEAR`。
+- `timeout 10 env RUN_DASHBOARD=0 RUN_ACTUATOR_BRIDGE=0 ./scripts/run_demo.sh`
+  → segfault なし。Camera AI status log に ONNX model 選択と `camera=ok model=ok` を確認。
+- `tail data/logs/feeding_decision_log.csv`
+  → stale data 時は `ERROR_SAFE`/`HOLD`、Camera AI 復帰後は `LIVE_CAMERA`/`IDLE`/`RELEASE_OFF`。
+- `bash -n scripts/run_demo.sh` → OK。
+- `.venv/bin/python -m py_compile raspberry_pi/camera_ai/bear_detector.py raspberry_pi/camera_ai/run_camera_ai.py raspberry_pi/camera_ai/camera_capture.py`
+  → OK。
+- `.venv/bin/python -m pytest tests/test_camera_capture_config.py tests/test_camera_ai_model_selection.py tests/test_safety_to_actuator.py`
+  → 18 passed。
+- `.venv/bin/python -m pytest` → 57 passed。
+
+結果:
+
+- `./scripts/run_demo.sh` は ONNX model を優先して起動し、会場カメラでは 5fps 設定で
+  Camera AI と feeding safety decision mirror が通る状態になった。
+- ONNX Runtime の DRM device discovery warning は残るが、推論自体は CPUExecutionProvider で成功している。
+
+残課題:
+
+- Arduino を USB 接続して `/dev/ttyACM0` または `/dev/ttyUSB0` を確認し、
+  `RUN_ACTUATOR_BRIDGE=1 ./scripts/run_demo.sh` で実機機構の RELEASE/STOP 伝達を確認する。
+- 熊画像または対象物をカメラ前に置いて `AI_BEAR_DETECTED` から安全判定 mirror への入力変化を確認する。
+- カメラが再び `AI_CAMERA_OPEN_ERROR` になる場合は USB 抜き差し、別ポート、または外部給電 hub で再試行する。
+
+### 2026-07-06T11:50:01+09:00 — Dashboard Camera AI MJPEG 表示化
+
+根拠: 未コミット差分、ローカル実機ログ確認、およびファイルシステム編集時刻。Gitコミット日時ではない。
+
+目的:
+
+- Dashboard の Camera AI View が静止画更新に見えてデモしづらいため、映像として継続表示できるようにする。
+- 推論は 2 秒間隔のまま余裕を持たせ、表示フレームだけを 5fps 相当に近づける。
+- ページ全体の自動更新で camera stream が毎回切断されないようにする。
+
+変更ファイル:
+
+- `raspberry_pi/dashboard/app.py`
+- `raspberry_pi/camera_ai/config.camera_ai.yaml`
+- `raspberry_pi/dashboard/README.md`
+- `raspberry_pi/camera_ai/README.md`
+- `tests/test_dashboard.py`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- Dashboard に `/camera/stream.mjpg` を追加し、`latest_camera_ai.jpg` の更新を
+  `multipart/x-mixed-replace` として配信するようにした。
+- Camera AI View の `<img>` を `/camera/latest.jpg` から `/camera/stream.mjpg` に切り替えた。
+- Dashboard の periodic refresh で Camera AI View section を保持し、
+  state table 更新時に MJPEG 接続を作り直さないようにした。
+- `debug_frame_interval_sec` を `1.0` から `0.2` に変更し、
+  5fps camera の表示フレーム更新に追従しやすくした。
+- Dashboard/Camera AI README に、Camera AI View が MJPEG stream として表示されることを追記した。
+- Dashboard test に MJPEG stream endpoint の検証を追加した。
+
+安全・インターフェースへの影響:
+
+- Arduino Uno Q の release decision、状態機械、serial protocol、CSV interface は変更なし。
+- Camera AI の推論間隔は `inference_interval_sec: 2.0` のままで、表示更新だけを高速化。
+- Camera AI frame が途切れても既存どおり safety controller は stale camera data を HOLD/RELEASE_OFF として扱う。
+- MJPEG stream は remote monitoring 専用で、機構への command は送らない。
+
+検証:
+
+- 最新 debug frame の輝度確認:
+  `mean=1.1907`, `min=0`, `max=255` で、UI ではなく入力フレーム自体がほぼ黒い状態を確認。
+- `bash -n scripts/run_demo.sh` → OK。
+- `.venv/bin/python -m py_compile raspberry_pi/dashboard/app.py raspberry_pi/camera_ai/run_camera_ai.py raspberry_pi/camera_ai/camera_capture.py`
+  → OK。
+- `.venv/bin/python -m pytest tests/test_dashboard.py tests/test_camera_capture_config.py tests/test_camera_ai_model_selection.py tests/test_safety_to_actuator.py`
+  → 31 passed。
+- `.venv/bin/python -m pytest` → 58 passed。
+- `env RUN_ACTUATOR_BRIDGE=0 ./scripts/run_demo.sh`
+  → dashboard が `http://127.0.0.1:8080` と `http://192.168.137.128:8080` で起動。
+- `urllib.request.urlopen("http://127.0.0.1:8080/camera/stream.mjpg")`
+  → `Content-Type: multipart/x-mixed-replace; boundary=frame` と JPEG header `0xff 0xd8` を確認。
+
+結果:
+
+- Dashboard は最新 Camera AI frame を MJPEG stream として表示できるようになった。
+- 表示は 0.2 秒間隔で更新可能になり、ONNX 推論は 2 秒間隔のまま余裕を残す構成になった。
+
+残課題:
+
+- 実カメラ映像がまだ暗い場合は、カメラの向き、レンズカバー、照明、USB camera exposure/brightness control を確認する。
+
+### 2026-07-06T12:05:27+09:00 — Camera-first Dashboard と暗画面診断
+
+根拠: 未コミット差分、ローカル実機ログ確認、およびファイルシステム編集時刻。Gitコミット日時ではない。
+
+目的:
+
+- Demo 操作時に最初に確認したい `Camera AI View` と `Camera AI State` を dashboard 上段へ移動する。
+- 真っ黒画面が UI 問題か入力映像問題かを見分けられるよう、frame brightness と frame age を表示する。
+- BUFFALO USB camera の暗い入力に備え、`run_demo.sh` 起動時に V4L2 brightness/exposure 系 control を適用する。
+
+変更ファイル:
+
+- `raspberry_pi/dashboard/app.py`
+- `scripts/run_demo.sh`
+- `raspberry_pi/dashboard/README.md`
+- `raspberry_pi/camera_ai/README.md`
+- `tests/test_dashboard.py`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- Dashboard の first viewport を Camera AI 優先に変更し、左に `Camera AI View`、
+  右に `Camera AI State`、その下に feeding safety decision と demo controls を置く構成にした。
+- Dashboard が `latest_camera_ai.jpg` を OpenCV で読み、平均輝度 `frame_brightness` と
+  `frame_age_sec` を表示するようにした。
+- 平均輝度が 8.0 未満の場合、Camera AI View に `FRAME DARK` pill を表示するようにした。
+- Periodic refresh では MJPEG `<img>` 自体だけを保持し、周辺の brightness/state 表示は更新されるようにした。
+- `run_demo.sh` に `CAMERA_APPLY_V4L2_CONTROLS` と `CAMERA_V4L2_CONTROLS` を追加し、
+  既定で `/dev/video*` に
+  `brightness=32,gain=80,gamma=180,backlight_compensation=6,auto_exposure=3,exposure_dynamic_framerate=1`
+  を適用するようにした。
+- README に camera-first layout、MJPEG stream、暗画面診断、V4L2 control override を追記した。
+- Dashboard test で Camera AI View が Feeding Safety Decision より前に表示されることを検証した。
+
+安全・インターフェースへの影響:
+
+- Arduino Uno Q の release decision、状態機械、serial protocol、CSV interface は変更なし。
+- `run_demo.sh` の V4L2 control はカメラ画質のみを変更し、release command には影響しない。
+- Camera AI の brightness 診断は monitoring 表示専用で、安全判定には使用しない。
+- カメラが暗い、古い、または途切れた場合も既存どおり safety controller は HOLD/RELEASE_OFF 側で扱う。
+
+検証:
+
+- `v4l2-ctl --device=/dev/video0 --list-ctrls`
+  → `brightness`, `gain`, `gamma`, `backlight_compensation`, `auto_exposure`,
+  `exposure_dynamic_framerate` が利用可能。
+- `v4l2-ctl --device=/dev/video0 --set-ctrl=brightness=32,gain=80,gamma=180,backlight_compensation=6,auto_exposure=3,exposure_dynamic_framerate=1`
+  → control 適用 OK。
+- 実行中の Camera AI frame 確認:
+  `mean=1.1858`, `min=0`, `max=254` で、依然として入力映像自体がほぼ黒い状態。
+- `bash -n scripts/run_demo.sh` → OK。
+- `.venv/bin/python -m py_compile raspberry_pi/dashboard/app.py raspberry_pi/camera_ai/run_camera_ai.py raspberry_pi/camera_ai/camera_capture.py`
+  → OK。
+- `.venv/bin/python -m pytest tests/test_dashboard.py tests/test_camera_capture_config.py tests/test_camera_ai_model_selection.py tests/test_safety_to_actuator.py`
+  → 31 passed。
+- `.venv/bin/python -m pytest` → 58 passed。
+- `setsid env RUN_ACTUATOR_BRIDGE=0 ./scripts/run_demo.sh ...`
+  → 新 UI で dashboard 起動。process は Camera AI, safety controller, dashboard とも継続。
+- `http://127.0.0.1:8080/`
+  → `Camera AI View` が `Camera AI State` と `Feeding Safety Decision` より前に表示されることを確認。
+- `http://127.0.0.1:8080/camera/stream.mjpg`
+  → `multipart/x-mixed-replace; boundary=frame` と JPEG payload を確認。
+- V4L2 control 適用後の frame brightness:
+  `mean=216.9736`, `min=0`, `max=255`。`FRAME DARK` 表示なし。
+- Camera AI status log:
+  `camera=ok`, `model=ok` に加え、一度 `AI_BEAR_DETECTED`, `conf=0.52`, `area=11.5%` を確認。
+
+結果:
+
+- Dashboard の first viewport で Camera AI 映像と状態を同時確認できるようになった。
+- Dashboard 上で `FRAME DARK`, brightness, frame age を確認できるようになった。
+- `run_demo.sh` 再起動時に、会場用の V4L2 明るさ調整が自動適用される。
+- 再起動後、カメラ入力はほぼ黒から十分明るいフレームへ改善した。
+
+残課題:
+
+- 明るさが過剰または白飛びする場合は `CAMERA_V4L2_CONTROLS` で brightness/gain/gamma を下げる。
+- Arduino serial が見え次第、`RUN_ACTUATOR_BRIDGE=1` で RELEASE/STOP 伝達を確認する。
+
+### 2026-07-06T13:26:25+09:00 — Camera AI View 表示の白飛び・箱描画整理
+
+根拠: 未コミット差分、ローカル実機ログ確認、およびファイルシステム編集時刻。Gitコミット日時ではない。
+
+目的:
+
+- Camera AI View の白飛び、色の暴れ、`AI_NO_BEAR` 時の紛らわしい低信頼 box 表示を減らす。
+- 320px幅の camera frame 上で status text が長すぎて切れる問題を抑える。
+- カメラ開閉を繰り返すと BUFFALO USB camera が UVC probe error を出すため、demo 起動は一本化する。
+
+変更ファイル:
+
+- `raspberry_pi/camera_ai/run_camera_ai.py`
+- `scripts/run_demo.sh`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- Debug/Dashboard 表示用 frame をグレースケール化し、明るすぎる場合は暗く、暗すぎる場合は少し持ち上げる
+  display-only tone adjustment を追加した。推論入力 frame は変更しない。
+- `AI_NO_BEAR` 時の低信頼候補 box を描かないように、display box は target class かつ
+  `confidence_threshold` 以上の検出だけに絞った。
+- Overlay text を `NO_BEAR conf=- infer=...ms` / `BEAR conf=... infer=...ms` の短い形式へ変更した。
+- `run_demo.sh` の V4L2 control 既定値を、黒画面を避けるため明るめ入力
+  `brightness=32,gain=80,gamma=180,backlight_compensation=6,contrast=32,saturation=55,auto_exposure=3`
+  に戻した。
+
+安全・インターフェースへの影響:
+
+- Arduino Uno Q の release decision、状態機械、serial protocol、CSV interface は変更なし。
+- Display-only tone adjustment は dashboard/debug JPEG の見た目だけに影響し、AI 推論入力や安全判定には使わない。
+- 低信頼 box を非表示にしても CSV の `ai_bear_detected`, `confidence`, `event` contract は変更なし。
+- カメラが詰まる場合も既存どおり fail-safe / HOLD / RELEASE_OFF 側で扱う。
+
+検証:
+
+- `bash -n scripts/run_demo.sh` → OK。
+- `.venv/bin/python -m py_compile raspberry_pi/camera_ai/run_camera_ai.py raspberry_pi/dashboard/app.py`
+  → OK。
+- `.venv/bin/python -m pytest tests/test_camera_ai_approach_logic.py tests/test_camera_ai_model_selection.py tests/test_dashboard.py`
+  → 29 passed。
+- `.venv/bin/python -m pytest` → 58 passed。
+- USB reset 後、`setsid env RUN_ACTUATOR_BRIDGE=0 ./scripts/run_demo.sh ...`
+  → Camera AI, safety controller, dashboard 起動。
+- Camera AI status log → `camera=ok`, `model=ok`, `AI_NO_BEAR` で継続。直前の安定時には
+  `AI_BEAR_DETECTED` も確認。
+- 最新 debug frame は box/filter/text の表示整理を反映。カメラ入力自体は UVC 状態や向きにより
+  暗く掴むことがあり、frame brightness は変動する。
+
+結果:
+
+- Dashboard の見た目は、低信頼 box の乱発と長い status text が抑えられた。
+- 色の暴れは表示用グレースケール化で軽減した。
+- カメラそのものは UVC 非準拠挙動があり、開閉を繰り返すと黒画面または open error になりやすい。
+
+残課題:
+
+- Demo 中は `./scripts/run_demo.sh` を一度起動したら、追加の `camera_test.py` や別プロセスで
+  `/dev/video0` を開かない。
+- 画面が暗く掴まった場合は、USB camera を物理的に抜き差し、または USB authorized reset 後に
+  `./scripts/run_demo.sh` を一回だけ再起動する。
+
+### 2026-07-06T13:35:14+09:00 — 黒フレーム自己回復と診断表示
+
+根拠: 未コミット差分、ローカル実機ログ確認、およびファイルシステム編集時刻。Gitコミット日時ではない。
+
+目的:
+
+- Camera AI View が `LIVE` のまま黒画面になる状態を、正常映像として扱わない。
+- 黒フレームが続いた場合、安全側に落として Camera AI 内で capture を開き直す。
+- 黒フレーム時は真っ黒な画像ではなく、原因が分かる診断フレームを dashboard に表示する。
+
+変更ファイル:
+
+- `raspberry_pi/camera_ai/run_camera_ai.py`
+- `raspberry_pi/camera_ai/config.camera_ai.yaml`
+- `raspberry_pi/dashboard/app.py`
+- `scripts/run_demo.sh`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- Camera AI に raw frame brightness 監視を追加し、平均輝度が `dark_frame_mean_threshold`
+  未満で `dark_frame_recovery_sec` 以上続いた場合、`AI_CAMERA_DARK_FRAME` を publish して
+  capture を release/open するようにした。
+- `config.camera_ai.yaml` に `dark_frame_mean_threshold: 30.0`,
+  `dark_frame_recovery_sec: 3.0`, `camera_reopen_delay_sec: 1.0` を追加した。
+- `AI_CAMERA_DARK_FRAME` 時の debug frame を灰色の診断画面にし、真っ黒のまま表示しないようにした。
+- Dashboard の `FRAME DARK` 判定閾値を brightness `< 35.0` に上げた。
+- `run_demo.sh` の Camera AI child process を supervisor loop にし、Camera AI が非ゼロ終了した場合も
+  2秒待って再試行するようにした。
+
+安全・インターフェースへの影響:
+
+- 黒フレーム時は `ai_camera_ok=false` で publish するため、safety controller は既存どおり
+  `ERROR_SAFE` / HOLD / RELEASE_OFF 側に落ちる。
+- Arduino Uno Q の release decision、状態機械、serial protocol、CSV interface は変更なし。
+- Camera AI の再起動・再openは上位監視と表示復旧のためで、放出許可を単独で出さない。
+
+検証:
+
+- `.venv/bin/python -m py_compile raspberry_pi/camera_ai/run_camera_ai.py raspberry_pi/dashboard/app.py`
+  → OK。
+- `.venv/bin/python -m pytest tests/test_camera_ai_approach_logic.py tests/test_camera_ai_model_selection.py tests/test_dashboard.py`
+  → 29 passed。
+- `.venv/bin/python -m pytest` → 58 passed。
+- USB reset 後、`setsid env RUN_ACTUATOR_BRIDGE=0 ./scripts/run_demo.sh ...`
+  → Camera AI, safety controller, dashboard 起動。
+- Camera AI status log → `AI_CAMERA_DARK_FRAME` を検出後も supervisor で再試行し、
+  その後 `camera=ok`, `model=ok`, `AI_NO_BEAR` の継続を確認。
+- 最新 debug frame → brightness mean `115.7` まで復帰し、真っ黒表示ではなくなった。
+
+結果:
+
+- 黒フレームは Camera AI の異常入力として扱われ、dashboard でも診断できるようになった。
+- 現在の dashboard は真っ黒ではなく、グレースケールのライブフレームを表示している。
+
+残課題:
+
+- 最新映像は一様な面を見ているため、熊検出デモ時はカメラの向き・距離・照明を物理的に調整する。
+- BUFFALO USB camera は UVC 非準拠挙動があるため、デモ中に別プロセスで `/dev/video0` を開かない。
+
+### 2026-07-06T13:49:14+09:00 — Camera AI ドライバー層の再設計
+
+根拠: ファイルシステム編集時刻。Gitコミット日時ではない。
+
+目的:
+
+- 画面が不安定で使い物にならない状態を、アプリループ側の応急処置ではなくカメラドライバー設計から直す。
+- OpenCV `VideoCapture` の open/read/release、fallback profile、連続読取失敗、暗転検知、再openを `camera_capture.py` に集約する。
+- Camera AI の異常時は `ai_camera_ok=false` / `ai_bear_approaching=false` を publish し、蜂蜜放出判断へは安全側の入力だけを渡す。
+
+変更ファイル:
+
+- `raspberry_pi/camera_ai/camera_capture.py`
+- `raspberry_pi/camera_ai/run_camera_ai.py`
+- `raspberry_pi/camera_ai/config.camera_ai.yaml`
+- `raspberry_pi/camera_ai/README.md`
+- `docs/camera_ai_design.md`
+- `tests/test_camera_capture_config.py`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- `OpenCvCameraDriver` と `CameraFrameResult` を追加し、カメラ lifecycle を独立したドライバー層に分離した。
+- ドライバーが fallback profile 選択、frame retry、連続読取失敗後の安全な reopen、暗フレーム継続後の reopen を担当するようにした。
+- `run_camera_ai.py` の推論ループとカメラ専用 fail-safe ループを、直接 `VideoCapture` を操作しない形へ変更した。
+- `--no-inference` 時も実フレーム読取前に `camera=ok` を出さないようにし、カメラ未接続時の状態表示を安全側にそろえた。
+- `config.camera_ai.yaml` に `max_consecutive_read_failures: 3` を追加した。
+- README と設計資料に、ドライバー層、reopen条件、Camera AI が release を直接命令しないことを追記した。
+- fake OpenCV/capture を使うドライバー単体テストを追加した。
+
+安全・インターフェースへの影響:
+
+- Camera AI の異常は `ai_camera_ok=false` かつ `ai_bear_approaching=false` で publish されるため、safety controller は既存どおり HOLD / RELEASE_OFF 側へ倒れる。
+- Arduino Uno Q の release decision、接触パッド状態機械、serial protocol、CSV interface は変更なし。
+- カメラ再openは表示・AI入力の復旧のためだけで、蜂蜜放出を単独で許可しない。
+
+検証:
+
+- `.venv/bin/python -m py_compile raspberry_pi/camera_ai/camera_capture.py raspberry_pi/camera_ai/run_camera_ai.py raspberry_pi/dashboard/app.py`
+  → OK。
+- `.venv/bin/python -m pytest tests/test_camera_capture_config.py tests/test_camera_ai_model_selection.py tests/test_dashboard.py`
+  → 32 passed。
+- `.venv/bin/python -m pytest`
+  → 62 passed。
+
+結果:
+
+- カメラの不安定さに対する責務が `camera_capture.py` のドライバー層へ集約された。
+- 推論ループとダッシュボード用フレーム保存は、ドライバーから返る `CameraFrameResult` に従って fail-safe publish / debug frame 更新を行う構造になった。
+
+残課題:
+
+- 実機 BUFFALO BSW500M で、長時間デモ中の黒画面復旧と MJPEG dashboard の安定性を再確認する。
+- UVC/USBレベルで `VIDIOC_STREAMON` が失敗する場合は、コードではなくケーブル、電源、USBポート、UVC driver quirk の確認が必要。

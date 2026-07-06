@@ -116,8 +116,10 @@ Raspberry Pi を唯一の安全制御器にしないこと。カメラAIは追�
 BUFFALO BSW500M USB Webカメラを Raspberry Pi 4B に接続する。
 
 ```text
+- USB ID: 0411:02da
 - /dev/video0: 実際の映像ストリーム
 - /dev/video1: metadata device。画像取得には使わない
+- 既定設定: device=auto。0411:02da の Video Capture ノードを優先し、metadata ノードは避ける
 - 推奨FourCC: まずMJPG、失敗時にYUYV
 - 推奨解像度: まず640x480、失敗時に320x240
 ```
@@ -429,6 +431,9 @@ ONNX 書き出し手順（Colab で実行し、Pi は runtime requirements の�
 推論を有効にする（`RUN_CAMERA_AI_INFERENCE` が自動的に 1）。ONNX がないときは
 既定でカメラのみフェイルセーフモード（`ai_model_ok=false`・HOLD を維持・
 画面は更新され続ける）になる。
+`scripts/run_demo.sh` の既定は `CAMERA_DEVICE=auto` で、BUFFALO BSW500M の
+Video Capture ノードを選ぶ。会場で固定したい場合は
+`CAMERA_DEVICE=/dev/video0 ./scripts/run_demo.sh` を使う。
 
 Raspberry Pi 4B向けにnano `.pt` モデルを軽量形式へ書き出す:
 
@@ -444,7 +449,7 @@ Camera AI 実行コマンド:
 
 ```bash
 python3 -m compileall -q raspberry_pi/camera_ai
-python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
+python3 raspberry_pi/camera_ai/camera_test.py --device auto
 python3 -m raspberry_pi.camera_ai.run_camera_ai --terminal-status --no-jsonl --once
 ```
 
@@ -662,7 +667,7 @@ data/debug_frames/latest_camera_ai.jpg
 
 ```bash
 python -m raspberry_pi.camera_ai.run_camera_ai \
-  --device /dev/video0 \
+  --device auto \
   --terminal-status \
   --no-jsonl \
   --save-debug-frames
@@ -672,7 +677,7 @@ python -m raspberry_pi.camera_ai.run_camera_ai \
 
 ```bash
 python -m raspberry_pi.camera_ai.run_camera_ai \
-  --device /dev/video0 \
+  --device auto \
   --terminal-status \
   --no-jsonl \
   --once \
@@ -682,7 +687,7 @@ python -m raspberry_pi.camera_ai.run_camera_ai \
 カメラ単体確認:
 
 ```bash
-python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
+python3 raspberry_pi/camera_ai/camera_test.py --device auto
 ```
 
 ### Raspberry Pi ダッシュボード

@@ -9,6 +9,7 @@ This module is only an additional perception layer. It does not replace the Ardu
 
 - Raspberry Pi 4B 4GB
 - BUFFALO BSW500M USB web camera
+- BSW500M USB ID on the target Pi: `0411:02da`
 - No real sensors are required for this camera AI module
 - No real animal testing is part of this prototype
 
@@ -60,10 +61,17 @@ http://<pi-ip>:8080
 What you should see:
 
 ```text
-- Camera AI View: latest camera frame with detection boxes and status text
+- Camera AI View: live stream of the latest camera frames with detection boxes and status text
 - Camera AI State: event, camera/model status, confidence, approach state
 - Contact Pad State: latest contact-pad / release CSV state when available
 ```
+
+`./scripts/run_demo.sh` resolves `CAMERA_DEVICE=auto` to the BSW500M video
+capture node before opening the camera. On the target Pi this is `/dev/video0`;
+`/dev/video1` is the UVC metadata node and is skipped. The script also applies
+a venue-oriented V4L2 brightness/exposure boost before opening the resolved
+device. Override it with `CAMERA_V4L2_CONTROLS=...` or disable it with
+`CAMERA_APPLY_V4L2_CONTROLS=0` if the camera looks washed out.
 
 The Camera AI image shown by the dashboard is written here:
 
@@ -72,8 +80,10 @@ data/debug_frames/latest_camera_ai.jpg
 ```
 
 That image includes the latest camera frame, detection boxes, event,
-confidence, approach state, and inference time. It is for remote monitoring
-only and does not change the Arduino/contact-pad RELEASE_ON/OFF safety logic.
+confidence, approach state, and inference time. The dashboard serves it as an
+MJPEG stream so the video view can update faster than the inference interval.
+It is for remote monitoring only and does not change the Arduino/contact-pad
+RELEASE_ON/OFF safety logic.
 
 To stop the demo, press `Ctrl+C` in the terminal running `./scripts/run_demo.sh`.
 
@@ -103,7 +113,7 @@ without the dashboard:
 ```bash
 source .venv/bin/activate
 python -m raspberry_pi.camera_ai.run_camera_ai \
-  --device /dev/video0 \
+  --device auto \
   --terminal-status \
   --no-jsonl \
   --save-debug-frames
@@ -113,7 +123,7 @@ One-shot smoke test:
 
 ```bash
 python -m raspberry_pi.camera_ai.run_camera_ai \
-  --device /dev/video0 \
+  --device auto \
   --terminal-status \
   --no-jsonl \
   --once \
@@ -311,12 +321,13 @@ combination.
 The Raspberry Pi 4B 4GB profile uses:
 
 ```text
-capture: 320x240 MJPG at 10 fps
+capture: 320x240 MJPG at 5 fps
+driver recovery: reopen after 3 consecutive read failures or 3 sec dark frame
 YOLO input_size: 256
 primary model: models/yolo_bear_ncnn_model
 fallbacks: models/yolo_bear_int8.tflite, models/yolo_bear.onnx, models/yolo_bear.pt
 inference interval: about 2.0 sec
-remote dashboard JPEG update interval: about 1.0 sec
+remote dashboard JPEG update interval: about 0.2 sec
 ```
 
 For prototype bring-up on Colab or a development PC, this file may be a
@@ -401,7 +412,9 @@ source .venv/bin/activate
 python raspberry_pi/camera_ai/camera_test.py
 ```
 
-Or pass the target Linux video device path explicitly:
+The default `auto` device mode prefers the BUFFALO BSW500M USB ID `0411:02da`
+and then checks V4L2 `Device Caps` so metadata-only nodes are not selected. Or
+pass the target Linux video device path explicitly:
 
 ```bash
 source .venv/bin/activate
@@ -410,18 +423,21 @@ python raspberry_pi/camera_ai/camera_test.py --device /dev/video0
 
 For the BUFFALO BSW500M USB camera on Raspberry Pi 4B, `/dev/video0` is the
 image capture device. `/dev/video1` is metadata and must not be used by OpenCV.
-The default profile tries this first:
+The default profile tries this on the resolved device first:
 
 ```text
-/dev/video0, MJPG, 640x480, 15 fps
+auto -> /dev/video0, MJPG, 320x240, 5 fps
 ```
 
 If this fails, the script automatically falls back to:
 
 ```text
-/dev/video0, MJPG, 320x240, 15 fps
-/dev/video0, YUYV, 640x480, 15 fps
-/dev/video0, YUYV, 320x240, 15 fps
+resolved device, MJPG, 640x480, 15 fps
+resolved device, MJPG, 320x240, 15 fps
+resolved device, YUYV, 640x480, 15 fps
+resolved device, YUYV, 320x240, 15 fps
+resolved device, MJPG, 320x240, 5 fps
+resolved device, YUYV, 320x240, 5 fps
 ```
 
 Check supported V4L2 formats before changing code:
@@ -449,8 +465,13 @@ source .venv/bin/activate
 python raspberry_pi/camera_ai/run_camera_ai.py --config raspberry_pi/camera_ai/config.camera_ai.yaml
 ```
 
-The default config uses `/dev/video0`, V4L2, `MJPG`, `320x240`, and `10 fps`,
-with fallback profiles if frame capture fails.
+The default config uses `device: auto`, V4L2, `MJPG`, `320x240`, and `5 fps`.
+On the target BSW500M setup this resolves to `/dev/video0` and avoids the
+metadata-only `/dev/video1`.
+`camera_capture.py` owns the OpenCV/V4L2 driver lifecycle: it selects fallback
+profiles, retries short frame drops, detects sustained dark frames, and safely
+reopens the capture handle. Camera or driver faults publish `ai_camera_ok=false`
+and keep `ai_bear_approaching=false`; they do not command release.
 
 Override camera and model:
 

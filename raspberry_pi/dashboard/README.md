@@ -1,9 +1,12 @@
 # Raspberry Pi Dashboard
 
 Simple web dashboard showing the integrated feeding-safety decision, Camera AI
-state, contact-pad state, servo command, CSV status, and the latest annotated
-camera frame. This is intended for SSH/Tailscale remote demo monitoring from a
-browser.
+state, contact-pad state, servo command, CSV status, and a live MJPEG view of
+the latest annotated camera frames. This is intended for SSH/Tailscale remote
+demo monitoring from a browser.
+
+The first screen prioritizes `Camera AI View` and `Camera AI State`, followed by
+the integrated feeding-safety decision and demo controls.
 
 ## Install
 
@@ -29,11 +32,16 @@ For remote operation, open the same dashboard through the Raspberry Pi Tailscale
 address. The Arduino remains connected to the Raspberry Pi by wired USB serial;
 the dashboard does not assume the Arduino has Wi-Fi.
 
-The camera image appears after Camera AI writes:
+The camera stream appears after Camera AI writes:
 
 ```text
 data/debug_frames/latest_camera_ai.jpg
 ```
+
+The dashboard serves that updated frame as `/camera/stream.mjpg`, so the camera
+view can remain live while Camera AI inference runs at a slower interval.
+If the latest frame is almost black, the dashboard marks it as `FRAME DARK` and
+shows the measured frame brightness.
 
 ## Demo Mode
 

@@ -12,22 +12,16 @@ try:
     from .approach_logic import ApproachDetectionConfig, ApproachLogic
     from .bear_detector import YoloBearDetector
     from .camera_capture import (
-        DEFAULT_CAMERA_DEVICE,
-        fallback_profiles,
-        open_camera_with_fallbacks,
-        read_frame_with_retries,
-        resolve_camera_source,
+        OpenCvCameraDriver,
+        camera_driver_from_config,
     )
 except ImportError:
     from ai_state_publisher import AiState, AiStatePublisher
     from approach_logic import ApproachDetectionConfig, ApproachLogic
     from bear_detector import YoloBearDetector
     from camera_capture import (
-        DEFAULT_CAMERA_DEVICE,
-        fallback_profiles,
-        open_camera_with_fallbacks,
-        read_frame_with_retries,
-        resolve_camera_source,
+        OpenCvCameraDriver,
+        camera_driver_from_config,
     )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -194,29 +188,6 @@ def config_path(path_value: str | Path) -> Path:
     return REPO_ROOT / path
 
 
-def open_camera(camera_config: dict, camera_override: int | None, device_override: str | None):
-    import cv2
-
-    camera_source = resolve_camera_source(
-        camera_config,
-        camera_override=camera_override,
-        device_override=device_override,
-    )
-    backend_name = str(camera_config.get("backend", "v4l2"))
-    result, _ = open_camera_with_fallbacks(
-        cv2,
-        camera_source=camera_source,
-        backend_name=backend_name,
-        profiles=fallback_profiles(camera_config),
-        read_test=True,
-        retries=int(camera_config.get("read_retries", 3)),
-        retry_delay_sec=float(camera_config.get("retry_delay_sec", 0.1)),
-    )
-    if result is None:
-        return None, str(camera_source)
-    return result.capture, str(camera_source)
-
-
 def build_fail_safe_state(
     *,
     camera_device: str,
@@ -286,23 +257,23 @@ def debug_frame_enabled(output_config: dict, args: argparse.Namespace) -> bool:
 
 def draw_status_panel(cv2, frame, record: dict) -> None:
     event = str(record.get("event") or "-")
-    bear_status = "bear=yes" if record.get("ai_bear_detected") else "bear=no"
-    approach_status = (
-        "approaching=yes" if record.get("ai_bear_approaching") else "approaching=no"
-    )
+    event_label = {
+        "AI_NO_BEAR": "NO_BEAR",
+        "AI_BEAR_DETECTED": "BEAR",
+        "AI_BEAR_APPROACHING": "APPROACH",
+    }.get(event, event)
     confidence = format_optional_float(record.get("ai_bear_confidence"))
     inference_ms = format_optional_float(record.get("inference_time_ms"), digits=1)
-    line = (
-        f"{event} | {bear_status} | {approach_status} | "
-        f"conf={confidence} | infer={inference_ms}ms"
-    )
+    line = f"{event_label} conf={confidence} infer={inference_ms}ms"
+    if record.get("ai_bear_approaching"):
+        line = f"{line} APPROACH"
     cv2.rectangle(frame, (0, 0), (frame.shape[1], 34), (0, 0, 0), thickness=-1)
     cv2.putText(
         frame,
         line,
         (8, 22),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
+        0.45,
         (255, 255, 255),
         1,
         cv2.LINE_AA,
@@ -318,7 +289,7 @@ def draw_detections(cv2, frame, detections: list[dict]) -> None:
         class_name = str(detection.get("class_name", "object"))
         confidence = format_optional_float(detection.get("confidence"))
         area = format_optional_percent(detection.get("box_area_ratio"))
-        label = f"{class_name} {confidence} area={area}"
+        label = f"{class_name} {confidence} {area}"
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 180, 255), thickness=2)
         label_y = max(16, y1 - 8)
         cv2.putText(
@@ -331,6 +302,71 @@ def draw_detections(cv2, frame, detections: list[dict]) -> None:
             1,
             cv2.LINE_AA,
         )
+
+
+def filter_display_detections(
+    detections: list[dict],
+    approach_config: ApproachDetectionConfig,
+) -> list[dict]:
+    target_classes = {class_name.lower() for class_name in approach_config.target_classes}
+    return [
+        detection
+        for detection in detections
+        if str(detection.get("class_name", "")).lower() in target_classes
+        and float(detection.get("confidence", 0.0))
+        >= approach_config.confidence_threshold
+    ]
+
+
+def prepare_display_frame(cv2, frame):
+    display_frame = frame.copy()
+    gray_frame = cv2.cvtColor(display_frame, cv2.COLOR_BGR2GRAY)
+    brightness_mean = float(gray_frame.mean())
+    if brightness_mean > 170.0:
+        display_frame = cv2.convertScaleAbs(display_frame, alpha=0.65, beta=-30)
+    elif brightness_mean < 35.0:
+        display_frame = cv2.convertScaleAbs(display_frame, alpha=1.8, beta=20)
+
+    gray_display_frame = cv2.cvtColor(display_frame, cv2.COLOR_BGR2GRAY)
+    return cv2.cvtColor(gray_display_frame, cv2.COLOR_GRAY2BGR)
+
+
+def build_dark_frame_notice(cv2, frame, record: dict):
+    height, width = frame.shape[:2]
+    notice_frame = frame.copy()
+    notice_frame[:] = (44, 44, 44)
+    cv2.rectangle(notice_frame, (0, 0), (width, 42), (0, 0, 0), thickness=-1)
+    cv2.putText(
+        notice_frame,
+        "CAMERA_DARK",
+        (10, 27),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        notice_frame,
+        "camera is returning dark frames",
+        (10, max(78, height // 2 - 10)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (230, 230, 230),
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        notice_frame,
+        "reopening camera safely",
+        (10, max(108, height // 2 + 22)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (230, 230, 230),
+        1,
+        cv2.LINE_AA,
+    )
+    return notice_frame
 
 
 def save_debug_frame(
@@ -346,9 +382,12 @@ def save_debug_frame(
     debug_frame_dir.mkdir(parents=True, exist_ok=True)
     latest_frame_path = debug_frame_dir / latest_frame_name
     temporary_frame_path = latest_frame_path.with_suffix(".tmp.jpg")
-    annotated_frame = frame.copy()
-    draw_detections(cv2, annotated_frame, detections)
-    draw_status_panel(cv2, annotated_frame, record)
+    if record.get("event") == "AI_CAMERA_DARK_FRAME":
+        annotated_frame = build_dark_frame_notice(cv2, frame, record)
+    else:
+        annotated_frame = prepare_display_frame(cv2, frame)
+        draw_detections(cv2, annotated_frame, detections)
+        draw_status_panel(cv2, annotated_frame, record)
     if not cv2.imwrite(str(temporary_frame_path), annotated_frame):
         raise RuntimeError(f"failed to write debug frame: {temporary_frame_path}")
     temporary_frame_path.replace(latest_frame_path)
@@ -378,8 +417,7 @@ def run_camera_only_failsafe_loop(
     *,
     args,
     publisher: AiStatePublisher,
-    capture,
-    camera_device: str,
+    driver: OpenCvCameraDriver,
     save_frames: bool,
     debug_frame_dir: Path,
     latest_frame_name: str,
@@ -393,7 +431,7 @@ def run_camera_only_failsafe_loop(
     This keeps the dashboard visually live while remaining in safe HOLD.
     """
     failsafe_state = AiState(
-        camera_device=camera_device,
+        camera_device=driver.camera_device,
         ai_camera_ok=True,
         ai_model_ok=False,
         ai_bear_detected=False,
@@ -404,25 +442,43 @@ def run_camera_only_failsafe_loop(
         inference_time_ms=None,
     )
     failsafe_record = failsafe_state.to_record()
-    publish_state(publisher, failsafe_state, terminal_status=args.terminal_status)
     last_record = failsafe_record
     last_debug_frame_saved_at = 0.0
     iteration_count = 0
     try:
         while True:
-            ok, frame = read_frame_with_retries(capture)
-            if not ok or frame is None:
-                publish_state(
+            read_result = driver.read_frame()
+            if not read_result.ok or read_result.frame is None:
+                last_record = publish_state(
                     publisher,
                     build_fail_safe_state(
-                        camera_device=camera_device,
+                        camera_device=read_result.camera_device,
                         ai_camera_ok=False,
                         ai_model_ok=False,
-                        event="AI_CAMERA_FRAME_ERROR",
+                        event=read_result.event,
                     ),
                     terminal_status=args.terminal_status,
                 )
-                return 1
+                if save_frames and read_result.frame is not None:
+                    save_debug_frame(
+                        read_result.frame,
+                        [],
+                        last_record,
+                        debug_frame_dir=debug_frame_dir,
+                        latest_frame_name=latest_frame_name,
+                    )
+                if args.once:
+                    return 1
+                iteration_count += 1
+                if (
+                    args.max_iterations is not None
+                    and iteration_count >= args.max_iterations
+                ):
+                    break
+                time.sleep(0.05)
+                continue
+
+            frame = read_result.frame
 
             now_monotonic = time.monotonic()
             should_save_debug_frame = (
@@ -442,7 +498,7 @@ def run_camera_only_failsafe_loop(
             last_record = publish_state(
                 publisher,
                 AiState(
-                    camera_device=camera_device,
+                    camera_device=read_result.camera_device,
                     ai_camera_ok=True,
                     ai_model_ok=False,
                     ai_bear_detected=False,
@@ -472,7 +528,7 @@ def run_camera_only_failsafe_loop(
     except KeyboardInterrupt:
         return 0
     finally:
-        capture.release()
+        driver.close()
         if use_display_active(output_config):
             import cv2
 
@@ -493,6 +549,8 @@ def main() -> int:
         return 1
 
     output_config = config.get("output", {})
+    camera_config = config.get("camera", {})
+    fail_safe_config = config.get("fail_safe", {})
     save_frames = debug_frame_enabled(output_config, args)
     debug_frame_dir = repo_path(output_config.get("debug_frame_dir", "data/debug_frames"))
     latest_frame_name = str(
@@ -506,64 +564,53 @@ def main() -> int:
     )
 
     try:
-        capture, camera_device = open_camera(
-            config.get("camera", {}),
-            args.camera,
-            args.device,
-        )
-    except Exception:
-        camera_config = config.get("camera", {})
-        camera_device = str(
-            args.device
-            or args.camera
-            or camera_config.get("device")
-            or DEFAULT_CAMERA_DEVICE
-        )
+        import cv2
+    except ImportError:
+        print("ERROR: opencv-python is not installed.")
+        return 1
+
+    driver = camera_driver_from_config(
+        cv2,
+        camera_config,
+        fail_safe_config=fail_safe_config,
+        camera_override=args.camera,
+        device_override=args.device,
+    )
+    startup_read = driver.read_frame()
+    camera_device = startup_read.camera_device
+    if not startup_read.ok:
         publish_state(
             publisher,
             build_fail_safe_state(
                 camera_device=camera_device,
                 ai_camera_ok=False,
                 ai_model_ok=False,
-                event="AI_CAMERA_OPEN_ERROR",
+                event=startup_read.event,
             ),
             terminal_status=args.terminal_status,
         )
-        return 1
+        if args.once:
+            driver.close()
+            return 1
 
-    if capture is None or not capture.isOpened():
-        publish_state(
-            publisher,
-            build_fail_safe_state(
+    if save_frames and startup_read.ok and startup_read.frame is not None:
+        save_debug_frame(
+            startup_read.frame,
+            [],
+            AiState(
                 camera_device=camera_device,
-                ai_camera_ok=False,
+                ai_camera_ok=True,
                 ai_model_ok=False,
-                event="AI_CAMERA_OPEN_ERROR",
-            ),
-            terminal_status=args.terminal_status,
+                ai_bear_detected=False,
+                ai_bear_confidence=None,
+                ai_bear_box_area_ratio=None,
+                ai_bear_approaching=False,
+                event="AI_MODEL_LOADING",
+                inference_time_ms=None,
+            ).to_record(),
+            debug_frame_dir=debug_frame_dir,
+            latest_frame_name=latest_frame_name,
         )
-        return 1
-
-    if save_frames:
-        ok, startup_frame = read_frame_with_retries(capture)
-        if ok and startup_frame is not None:
-            save_debug_frame(
-                startup_frame,
-                [],
-                AiState(
-                    camera_device=camera_device,
-                    ai_camera_ok=True,
-                    ai_model_ok=False,
-                    ai_bear_detected=False,
-                    ai_bear_confidence=None,
-                    ai_bear_box_area_ratio=None,
-                    ai_bear_approaching=False,
-                    event="AI_MODEL_LOADING",
-                    inference_time_ms=None,
-                ).to_record(),
-                debug_frame_dir=debug_frame_dir,
-                latest_frame_name=latest_frame_name,
-            )
 
     if args.no_inference:
         if args.terminal_status:
@@ -575,8 +622,7 @@ def main() -> int:
         return run_camera_only_failsafe_loop(
             args=args,
             publisher=publisher,
-            capture=capture,
-            camera_device=camera_device,
+            driver=driver,
             save_frames=save_frames,
             debug_frame_dir=debug_frame_dir,
             latest_frame_name=latest_frame_name,
@@ -592,14 +638,14 @@ def main() -> int:
         if args.terminal_status:
             print(f"selected_model={model_path}", file=sys.stderr, flush=True)
     except Exception as exc:
-        capture.release()
+        driver.close()
         if args.terminal_status:
             print(f"model_load_error={exc}", file=sys.stderr, flush=True)
         publish_state(
             publisher,
             build_fail_safe_state(
                 camera_device=camera_device,
-                ai_camera_ok=True,
+                ai_camera_ok=startup_read.ok,
                 ai_model_ok=False,
                 event="AI_MODEL_LOAD_ERROR",
             ),
@@ -632,19 +678,34 @@ def main() -> int:
     executor = ThreadPoolExecutor(max_workers=1)
     try:
         while True:
-            ok, frame = read_frame_with_retries(capture)
-            if not ok or frame is None:
-                publish_state(
+            read_result = driver.read_frame()
+            camera_device = read_result.camera_device
+            if not read_result.ok or read_result.frame is None:
+                failure_record = publish_state(
                     publisher,
                     build_fail_safe_state(
                         camera_device=camera_device,
                         ai_camera_ok=False,
                         ai_model_ok=True,
-                        event="AI_CAMERA_FRAME_ERROR",
+                        event=read_result.event,
                     ),
                     terminal_status=args.terminal_status,
                 )
-                return 1
+                if save_frames and read_result.frame is not None:
+                    save_debug_frame(
+                        read_result.frame,
+                        [],
+                        failure_record,
+                        debug_frame_dir=debug_frame_dir,
+                        latest_frame_name=latest_frame_name,
+                    )
+                    last_debug_frame_saved_at = time.monotonic()
+                if args.once:
+                    return 1
+                time.sleep(0.05)
+                continue
+
+            frame = read_result.frame
 
             now_monotonic = time.monotonic()
             completed_inference = False
@@ -680,7 +741,10 @@ def main() -> int:
                     ),
                     terminal_status=args.terminal_status,
                 )
-                last_detections = detections
+                last_detections = filter_display_detections(
+                    detections,
+                    approach_logic.config,
+                )
                 iteration_count += 1
                 completed_inference = True
                 last_inference_completed_at = now_monotonic
@@ -708,8 +772,6 @@ def main() -> int:
                 last_debug_frame_saved_at = now_monotonic
 
             if use_display:
-                import cv2
-
                 cv2.imshow("camera_ai", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
@@ -726,7 +788,7 @@ def main() -> int:
         publish_state(
             publisher,
             build_fail_safe_state(
-                camera_device=camera_device,
+                camera_device=driver.camera_device,
                 ai_camera_ok=True,
                 ai_model_ok=True,
                 event="AI_RUNTIME_ERROR",
@@ -736,10 +798,8 @@ def main() -> int:
         return 1
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
-        capture.release()
+        driver.close()
         if use_display:
-            import cv2
-
             cv2.destroyAllWindows()
 
     return 0

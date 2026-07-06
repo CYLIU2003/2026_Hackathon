@@ -65,7 +65,7 @@ Camera AI only:
 
 ```bash
 python -m raspberry_pi.camera_ai.run_camera_ai \
-  --device /dev/video0 \
+  --device auto \
   --terminal-status \
   --no-jsonl \
   --save-debug-frames
@@ -75,7 +75,7 @@ SSH-forwardable live viewer:
 
 ```bash
 python raspberry_pi/camera_ai/web_camera_ai.py \
-  --device /dev/video0 \
+  --device auto \
   --host 127.0.0.1 \
   --port 8081 \
   --terminal-status

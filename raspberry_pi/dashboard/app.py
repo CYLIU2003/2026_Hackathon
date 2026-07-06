@@ -8,6 +8,7 @@ from typing import Callable, Optional
 
 from flask import (
     Flask,
+    Response,
     abort,
     jsonify,
     redirect,
@@ -102,6 +103,20 @@ HTML_TEMPLATE = """
       }
       th { color: var(--muted); font-weight: 600; width: 42%; }
       .muted { color: var(--muted); }
+      .section-heading {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .section-heading h2 { margin: 0; }
+      .camera-view {
+        grid-column: 1 / 2;
+      }
+      .camera-state {
+        grid-column: 2 / 3;
+      }
       .camera-frame {
         width: 100%;
         max-height: 68vh;
@@ -109,6 +124,12 @@ HTML_TEMPLATE = """
         background: #111827;
         border: 1px solid var(--border);
         border-radius: 6px;
+      }
+      .frame-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 14px;
+        margin-top: 10px;
       }
       .placeholder {
         display: grid;
@@ -265,6 +286,8 @@ HTML_TEMPLATE = """
       .demo-status-table th { width: 24%; }
       @media (max-width: 860px) {
         main { grid-template-columns: 1fr; padding: 12px; }
+        .camera-view,
+        .camera-state { grid-column: 1 / -1; }
         .decision-grid { grid-template-columns: 1fr 1fr; }
       }
       @media (max-width: 520px) {
@@ -281,6 +304,62 @@ HTML_TEMPLATE = """
           data-refresh-interval="{{ refresh_interval }}"
           data-demo-enabled="{{ '1' if demo_status.get('demo_enabled') else '0' }}"
           data-emergency-stop="{{ '1' if demo_status.get('emergency_stop') else '0' }}">
+      <section class="camera-view" data-camera-stream-section>
+        <div class="section-heading">
+          <h2>Camera AI View</h2>
+          {% if camera_frame_stats.get('is_dark') %}
+            <span class="pill warn">FRAME DARK</span>
+          {% elif camera_frame_available %}
+            <span class="pill ok">LIVE</span>
+          {% else %}
+            <span class="pill warn">WAITING</span>
+          {% endif %}
+        </div>
+        {% if camera_frame_available %}
+          <img
+            class="camera-frame"
+            data-camera-stream
+            src="{{ url_for('camera_stream') }}?t={{ cache_buster }}"
+            alt="Live annotated Camera AI stream"
+          />
+          <div class="frame-meta muted">
+            <span>brightness: {{ camera_frame_stats.get('brightness_mean', '-') }}</span>
+            <span>age: {{ camera_frame_stats.get('age_sec', '-') }}s</span>
+          </div>
+        {% else %}
+          <div class="placeholder">
+            <div>
+              <strong>No camera frame yet</strong><br />
+              Start Camera AI with debug frames enabled.
+            </div>
+          </div>
+        {% endif %}
+        <p class="muted">Frame: {{ camera_frame_path }}</p>
+      </section>
+
+      <section class="camera-state">
+        <h2>Camera AI State</h2>
+        {% if camera_row %}
+          <table>
+            <tr><th>timestamp</th><td>{{ camera_row.get('timestamp') }}</td></tr>
+            <tr><th>event</th><td>{{ camera_row.get('event') }}</td></tr>
+            <tr><th>ai_camera_ok</th><td>{{ status_pill(camera_row.get('ai_camera_ok'))|safe }}</td></tr>
+            <tr><th>ai_model_ok</th><td>{{ status_pill(camera_row.get('ai_model_ok'))|safe }}</td></tr>
+            <tr><th>ai_bear_detected</th><td>{{ status_pill(camera_row.get('ai_bear_detected'))|safe }}</td></tr>
+            <tr><th>ai_bear_approaching</th><td>{{ status_pill(camera_row.get('ai_bear_approaching'))|safe }}</td></tr>
+            <tr><th>ai_bear_confidence</th><td>{{ camera_row.get('ai_bear_confidence') }}</td></tr>
+            <tr><th>ai_bear_box_area_ratio</th><td>{{ camera_row.get('ai_bear_box_area_ratio') }}</td></tr>
+            <tr><th>inference_time_ms</th><td>{{ camera_row.get('inference_time_ms') }}</td></tr>
+            <tr><th>frame_brightness</th><td>{{ camera_frame_stats.get('brightness_mean', '-') }}</td></tr>
+            <tr><th>frame_age_sec</th><td>{{ camera_frame_stats.get('age_sec', '-') }}</td></tr>
+            <tr><th>camera_device</th><td>{{ camera_row.get('camera_device') }}</td></tr>
+          </table>
+        {% else %}
+          <p>No Camera AI log data found yet.</p>
+        {% endif %}
+        <p class="muted">Camera log: {{ camera_log_path }}</p>
+      </section>
+
       <section class="decision">
         <h2>Feeding Safety Decision</h2>
         {% if row %}
@@ -526,46 +605,6 @@ HTML_TEMPLATE = """
 
 
       <section>
-        <h2>Camera AI View</h2>
-        {% if camera_frame_available %}
-          <img
-            class="camera-frame"
-            src="{{ url_for('camera_frame') }}?t={{ cache_buster }}"
-            alt="Latest annotated Camera AI frame"
-          />
-        {% else %}
-          <div class="placeholder">
-            <div>
-              <strong>No camera frame yet</strong><br />
-              Start Camera AI with debug frames enabled.
-            </div>
-          </div>
-        {% endif %}
-        <p class="muted">Frame: {{ camera_frame_path }}</p>
-      </section>
-
-      <section>
-        <h2>Camera AI State</h2>
-        {% if camera_row %}
-          <table>
-            <tr><th>timestamp</th><td>{{ camera_row.get('timestamp') }}</td></tr>
-            <tr><th>event</th><td>{{ camera_row.get('event') }}</td></tr>
-            <tr><th>ai_camera_ok</th><td>{{ status_pill(camera_row.get('ai_camera_ok'))|safe }}</td></tr>
-            <tr><th>ai_model_ok</th><td>{{ status_pill(camera_row.get('ai_model_ok'))|safe }}</td></tr>
-            <tr><th>ai_bear_detected</th><td>{{ status_pill(camera_row.get('ai_bear_detected'))|safe }}</td></tr>
-            <tr><th>ai_bear_approaching</th><td>{{ status_pill(camera_row.get('ai_bear_approaching'))|safe }}</td></tr>
-            <tr><th>ai_bear_confidence</th><td>{{ camera_row.get('ai_bear_confidence') }}</td></tr>
-            <tr><th>ai_bear_box_area_ratio</th><td>{{ camera_row.get('ai_bear_box_area_ratio') }}</td></tr>
-            <tr><th>inference_time_ms</th><td>{{ camera_row.get('inference_time_ms') }}</td></tr>
-            <tr><th>camera_device</th><td>{{ camera_row.get('camera_device') }}</td></tr>
-          </table>
-        {% else %}
-          <p>No Camera AI log data found yet.</p>
-        {% endif %}
-        <p class="muted">Camera log: {{ camera_log_path }}</p>
-      </section>
-
-      <section>
         <h2>Safety Control Details</h2>
         {% if row %}
           <table>
@@ -614,9 +653,9 @@ HTML_TEMPLATE = """
               var doc = new DOMParser().parseFromString(html, "text/html");
               var newMain = doc.getElementById("dashboard-main");
               if (newMain) {
-                main.innerHTML = newMain.innerHTML;
+                replaceMainContent(newMain);
                 // Re-run inline scripts inside the fetched content.
-                newMain.querySelectorAll("script").forEach(function (oldScript) {
+                main.querySelectorAll("script").forEach(function (oldScript) {
                   var script = document.createElement("script");
                   if (oldScript.src) {
                     script.src = oldScript.src;
@@ -632,6 +671,33 @@ HTML_TEMPLATE = """
             })
             .catch(function () { /* ignore transient fetch errors */ })
             .finally(function () { fetching = false; });
+        }
+
+        function replaceMainContent(newMain) {
+          var currentCameraStream = main.querySelector('[data-camera-stream]');
+          var newCameraStream = newMain.querySelector('[data-camera-stream]');
+          if (currentCameraStream && newCameraStream) {
+            newCameraStream.replaceWith(currentCameraStream);
+          }
+
+          Array.prototype.slice.call(main.attributes).forEach(function (attribute) {
+            main.removeAttribute(attribute.name);
+          });
+          Array.prototype.slice.call(newMain.attributes).forEach(function (attribute) {
+            main.setAttribute(attribute.name, attribute.value);
+          });
+
+          if (main.replaceChildren) {
+            main.replaceChildren.apply(main, Array.prototype.slice.call(newMain.childNodes));
+            return;
+          }
+
+          while (main.firstChild) {
+            main.removeChild(main.firstChild);
+          }
+          Array.prototype.slice.call(newMain.childNodes).forEach(function (node) {
+            main.appendChild(node);
+          });
         }
 
         function submitForm(form) {
@@ -754,6 +820,54 @@ def status_pill(value: object) -> str:
     css_class = "ok" if truthy(value) else "error"
     label = "true" if truthy(value) else "false"
     return f'<span class="pill {css_class}">{label}</span>'
+
+
+def stream_latest_jpeg_frames(camera_frame_path: Path, *, max_fps: float = 5.0):
+    min_interval_sec = 1.0 / max(0.5, float(max_fps))
+    last_mtime_ns = None
+    boundary = b"--frame\r\n"
+
+    while True:
+        try:
+            stat = camera_frame_path.stat()
+            if stat.st_size > 0 and stat.st_mtime_ns != last_mtime_ns:
+                frame_bytes = camera_frame_path.read_bytes()
+                last_mtime_ns = stat.st_mtime_ns
+                yield (
+                    boundary
+                    + b"Content-Type: image/jpeg\r\n"
+                    + f"Content-Length: {len(frame_bytes)}\r\n\r\n".encode("ascii")
+                    + frame_bytes
+                    + b"\r\n"
+                )
+        except FileNotFoundError:
+            pass
+
+        time.sleep(min_interval_sec)
+
+
+def camera_frame_stats(camera_frame_path: Path) -> dict:
+    if not camera_frame_path.exists():
+        return {}
+
+    stats = {
+        "age_sec": round(max(0.0, time.time() - camera_frame_path.stat().st_mtime), 1),
+        "size_bytes": camera_frame_path.stat().st_size,
+    }
+    try:
+        import cv2  # type: ignore
+
+        frame = cv2.imread(str(camera_frame_path))
+        if frame is None:
+            return stats
+        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        brightness_mean = round(float(gray_frame.mean()), 1)
+        stats["brightness_mean"] = brightness_mean
+        stats["is_dark"] = brightness_mean < 35.0
+    except Exception:
+        stats["brightness_mean"] = "-"
+        stats["is_dark"] = False
+    return stats
 
 
 def now_jst_iso() -> str:
@@ -1127,6 +1241,7 @@ def create_app(
         row = load_latest_row(chosen_log) if chosen_log else None
         camera_row = load_latest_row(chosen_camera_log) if chosen_camera_log else None
         camera_frame_path = debug_frame_dir / camera_frame_file
+        frame_stats = camera_frame_stats(camera_frame_path)
         motor_status = motor_controller.get_status()
         motor_config = motor_controller.config.to_dict()
         return render_template_string(
@@ -1137,6 +1252,7 @@ def create_app(
             camera_log_path=str(chosen_camera_log) if chosen_camera_log else "",
             camera_frame_path=str(camera_frame_path),
             camera_frame_available=camera_frame_path.exists(),
+            camera_frame_stats=frame_stats,
             cache_buster=time.time_ns(),
             refresh_interval=refresh_interval,
             demo_status=demo_service.status(),
@@ -1154,6 +1270,22 @@ def create_app(
             mimetype="image/jpeg",
             conditional=False,
             max_age=0,
+        )
+        response.headers["Cache-Control"] = (
+            "no-store, no-cache, must-revalidate, max-age=0"
+        )
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
+    @app.route("/camera/stream.mjpg")
+    def camera_stream():
+        camera_frame_path = debug_frame_dir / camera_frame_file
+        if not camera_frame_path.exists():
+            abort(404)
+        response = Response(
+            stream_latest_jpeg_frames(camera_frame_path),
+            mimetype="multipart/x-mixed-replace; boundary=frame",
         )
         response.headers["Cache-Control"] = (
             "no-store, no-cache, must-revalidate, max-age=0"

@@ -124,8 +124,10 @@ The Raspberry Pi should not be the only safety controller. Camera AI is an addit
 The BUFFALO BSW500M USB web camera is connected to the Raspberry Pi 4B.
 
 ```text
+- USB ID: 0411:02da
 - /dev/video0: actual image stream device
 - /dev/video1: metadata device, not for image capture
+- default config: device=auto, preferring the 0411:02da Video Capture node and skipping metadata nodes
 - recommended FourCC: MJPG first, then YUYV fallback
 - recommended resolution: 640x480 first, then 320x240 fallback
 ```
@@ -396,7 +398,8 @@ Hardware and runtime assumptions:
 ```text
 - Target device: Raspberry Pi 4B 4GB
 - Camera: BUFFALO BSW500M USB web camera
-- Capture device: /dev/video0
+- USB ID: 0411:02da
+- Capture device: device=auto, resolving to /dev/video0 on the target Pi
 - Metadata device: /dev/video1, not for capture
 - Primary model path: models/yolo_bear_ncnn_model
 - Fallback model path: models/yolo_bear.pt
@@ -449,6 +452,9 @@ When `models/yolo_bear.onnx` exists, `scripts/run_demo.sh` enables inference
 by default (`RUN_CAMERA_AI_INFERENCE` becomes 1 automatically). Without ONNX,
 the default is the camera-only fail-safe mode (`ai_model_ok=false`, HOLD stays,
 picture still keeps updating).
+The default `CAMERA_DEVICE=auto` selects the BUFFALO BSW500M Video Capture node;
+use `CAMERA_DEVICE=/dev/video0 ./scripts/run_demo.sh` if the demo venue needs a
+fixed device path.
 
 Lighten/export a nano `.pt` model for Raspberry Pi 4B:
 
@@ -464,7 +470,7 @@ Camera AI run commands:
 
 ```bash
 python3 -m compileall -q raspberry_pi/camera_ai
-python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
+python3 raspberry_pi/camera_ai/camera_test.py --device auto
 python3 -m raspberry_pi.camera_ai.run_camera_ai --terminal-status --no-jsonl --once
 ```
 
@@ -684,7 +690,7 @@ Camera AI only, without the dashboard:
 
 ```bash
 python -m raspberry_pi.camera_ai.run_camera_ai \
-  --device /dev/video0 \
+  --device auto \
   --terminal-status \
   --no-jsonl \
   --save-debug-frames
@@ -694,7 +700,7 @@ One-shot smoke test:
 
 ```bash
 python -m raspberry_pi.camera_ai.run_camera_ai \
-  --device /dev/video0 \
+  --device auto \
   --terminal-status \
   --no-jsonl \
   --once \
@@ -704,7 +710,7 @@ python -m raspberry_pi.camera_ai.run_camera_ai \
 Camera check:
 
 ```bash
-python3 raspberry_pi/camera_ai/camera_test.py --device /dev/video0
+python3 raspberry_pi/camera_ai/camera_test.py --device auto
 ```
 
 ### Raspberry Pi Dashboard

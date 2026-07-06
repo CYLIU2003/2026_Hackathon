@@ -261,10 +261,15 @@ class YoloBearDetector:
                 "Install raspberry_pi/camera_ai/requirements.txt on the Raspberry Pi."
             ) from exc
 
+        try:
+            ort.set_default_logger_severity(3)
+        except Exception:
+            pass
         self._cv2 = cv2
         session_options = ort.SessionOptions()
         session_options.intra_op_num_threads = 1
         session_options.inter_op_num_threads = 1
+        session_options.log_severity_level = 3
         self._onnx_session = ort.InferenceSession(
             self.model_path,
             sess_options=session_options,
