@@ -12,10 +12,10 @@ def test_inference():
         net.load_model("/content/2026_Hackathon/models/yolo_bear_ncnn_model/model.ncnn.bin")
 
         with net.create_extractor() as ex:
-            ex.input("in0", ncnn.Mat(in0.squeeze(0).numpy()).clone())
+            ex.input("in0", ncnn.Mat(in0.numpy(), batch_index=0).clone())
 
             _, out0 = ex.extract("out0")
-            out.append(torch.from_numpy(np.array(out0)).unsqueeze(0))
+            out.append(torch.from_numpy(out0.numpy(batch_index=0)))
 
     if len(out) == 1:
         return out[0]
