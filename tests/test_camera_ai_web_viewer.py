@@ -26,7 +26,6 @@ def test_terminal_status_is_compact_for_ssh():
             "timestamp": "2026-06-14T10:00:00+09:00",
             "event": "AI_BEAR_DETECTED",
             "ai_bear_detected": True,
-            "ai_bear_approaching": False,
             "ai_bear_confidence": 0.8,
             "inference_time_ms": 123.4,
         }
@@ -34,4 +33,4 @@ def test_terminal_status_is_compact_for_ssh():
 
     assert "event=AI_BEAR_DETECTED" in status
     assert "bear=yes" in status
-    assert "approaching=no" in status
+    assert "approaching=" not in status

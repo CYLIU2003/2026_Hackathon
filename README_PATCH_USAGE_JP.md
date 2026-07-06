@@ -75,7 +75,7 @@ python3 raspberry_pi/integration/fake_bear_to_actuator.py --no-serial --loop
 
 ## 5. 実YOLOへ差し替えるとき
 
-最終的には `fake_bear_to_actuator.py` の仮想 `ai_bear_approaching` を、既存の `raspberry_pi/camera_ai/run_camera_ai.py` の出力へ置き換えます。
+最終的には `fake_bear_to_actuator.py` の仮想 `ai_bear_detected` を、既存の `raspberry_pi/camera_ai/run_camera_ai.py` の出力へ置き換えます。
 
 ただし、YOLO単独でサーボを開いてはいけません。  
 Arduino側の接触確認、安全確認、蜂蜜量確認、非常停止確認を必ず通してください。

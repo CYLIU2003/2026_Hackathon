@@ -1,6 +1,6 @@
-# Camera AI Bear Approach Detection
+# Camera AI Bear Detection
 
-This prototype adds a Raspberry Pi camera AI module for bear approach detection.
+This prototype adds a Raspberry Pi camera AI module for bear detection.
 It uses a USB camera and a lightweight YOLO model to publish camera-derived state as JSON Lines.
 
 This module is only an additional perception layer. It does not replace the Arduino Uno Q contact-pad logic, `paw_contact`, `raw_contact_value`, resistance/contact thresholds, or the fail-safe `release_state` decision.
@@ -62,7 +62,7 @@ What you should see:
 
 ```text
 - Camera AI View: live stream of the latest camera frames with detection boxes and status text
-- Camera AI State: event, camera/model status, confidence, approach state
+- Camera AI State: event, camera/model status, confidence, detection state
 - Contact Pad State: latest contact-pad / release CSV state when available
 ```
 
@@ -81,7 +81,7 @@ data/debug_frames/latest_camera_ai.jpg
 ```
 
 That image includes the latest camera frame, detection boxes, event,
-confidence, approach state, and inference time. The dashboard serves it as an
+confidence, detection state, and inference time. The dashboard serves it as an
 MJPEG stream so the video view can update faster than the inference interval.
 It is for remote monitoring only and does not change the Arduino/contact-pad
 RELEASE_ON/OFF safety logic.
@@ -134,7 +134,7 @@ python -m raspberry_pi.camera_ai.run_camera_ai \
 Expected output includes a line like:
 
 ```text
-event=AI_NO_BEAR camera=ok model=ok bear=no approaching=no device=/dev/video0
+event=AI_NO_BEAR camera=ok model=ok bear=no device=/dev/video0
 ```
 
 ## Start Dashboard Only
@@ -202,7 +202,7 @@ python raspberry_pi/camera_ai/run_camera_ai.py \
 Example CUI status line:
 
 ```text
-2026-06-07T17:50:00+09:00 event=AI_BEAR_DETECTED camera=ok model=ok bear=yes approaching=no conf=0.82 area=18.0% infer_ms=120.5 device=/dev/video0
+2026-06-07T17:50:00+09:00 event=AI_BEAR_DETECTED camera=ok model=ok bear=yes conf=0.82 area=18.0% infer_ms=120.5 device=/dev/video0
 ```
 
 Use `--terminal-status` without `--no-jsonl` when another process needs JSON
@@ -232,7 +232,7 @@ data/debug_frames/latest_camera_ai.jpg
 ```
 
 The frame contains the latest camera image, detection boxes, event, confidence,
-approach state, and inference time. It is for remote monitoring only and does
+detection state, and inference time. It is for remote monitoring only and does
 not change release safety logic.
 
 Start Camera AI and the browser dashboard together:
@@ -475,7 +475,7 @@ metadata-only `/dev/video1`.
 `camera_capture.py` owns the OpenCV/V4L2 driver lifecycle: it selects fallback
 profiles, retries short frame drops, detects sustained dark frames, and safely
 reopens the capture handle. Camera or driver faults publish `ai_camera_ok=false`
-and keep `ai_bear_approaching=false`; they do not command release.
+and keep `ai_bear_detected=false`; they do not command release.
 
 Override camera and model:
 
@@ -508,7 +508,7 @@ python -m raspberry_pi.camera_ai.run_camera_ai \
 
 ## View Camera AI From Your PC Over SSH
 
-Recommended approach: run the camera AI web viewer on the Raspberry Pi, then
+Recommended workflow: run the camera AI web viewer on the Raspberry Pi, then
 open it from this PC through SSH local port forwarding. This does not require a
 monitor, desktop session, VNC, or X11 forwarding on the Raspberry Pi.
 
@@ -720,25 +720,23 @@ datasets, COCO caches, debug frames, logs, and intermediate ZIPs out of Git.
 The module emits JSON Lines:
 
 ```json
-{"timestamp":"2026-06-07T12:00:00+09:00","source":"camera_ai","camera_device":"/dev/video0","ai_camera_ok":true,"ai_model_ok":true,"ai_bear_detected":true,"ai_bear_confidence":0.82,"ai_bear_box_area_ratio":0.18,"ai_bear_approaching":true,"event":"AI_BEAR_APPROACHING","inference_time_ms":120.5}
+{"timestamp":"2026-06-07T12:00:00+09:00","source":"camera_ai","camera_device":"/dev/video0","ai_camera_ok":true,"ai_model_ok":true,"ai_bear_detected":true,"ai_bear_confidence":0.82,"ai_bear_box_area_ratio":0.18,"event":"AI_BEAR_DETECTED","inference_time_ms":120.5}
 ```
 
 If the camera, model, or runtime fails, the output is fail-safe:
 
 ```text
-ai_bear_approaching=false
+ai_bear_detected=false
 ```
 
 CSV logs are saved separately from contact-pad logs at `data/logs/camera_ai_log.csv` by default.
 
-## Approach Logic
+## Detection Logic
 
-`ai_bear_approaching` becomes true only when all configured conditions are satisfied:
+`ai_bear_detected` becomes true when the configured target is detected above the confidence threshold:
 
 - target class matches, default `bear`
 - confidence is at least `confidence_threshold`
-- bounding-box area ratio is at least `approach_area_ratio_threshold`
-- the condition is true for `consecutive_required` checks
 
 The camera AI module does not command honey release. A future integration must still require contact confirmation, honey availability, system safety, and no emergency stop before any release request.
 

@@ -1,2 +1,1 @@
-"""Camera AI support module for bear approach detection."""
-
+"""Camera AI support module for bear detection."""

@@ -247,6 +247,20 @@ HTML_TEMPLATE = """
         font-weight: 700;
         overflow-wrap: anywhere;
       }
+      .release-action {
+        border: 1px solid var(--border);
+        border-left: 6px solid var(--action);
+        border-radius: 7px;
+        padding: 12px;
+        margin-bottom: 12px;
+        background: #f8fbff;
+      }
+      .release-action-main {
+        font-size: 20px;
+        font-weight: 800;
+        line-height: 1.3;
+        overflow-wrap: anywhere;
+      }
       .demo-top,
       .demo-controls {
         display: flex;
@@ -341,18 +355,18 @@ HTML_TEMPLATE = """
         <h2>Camera AI State</h2>
         {% if camera_row %}
           <table>
-            <tr><th>timestamp</th><td>{{ camera_row.get('timestamp') }}</td></tr>
-            <tr><th>event</th><td>{{ camera_row.get('event') }}</td></tr>
-            <tr><th>ai_camera_ok</th><td>{{ status_pill(camera_row.get('ai_camera_ok'))|safe }}</td></tr>
-            <tr><th>ai_model_ok</th><td>{{ status_pill(camera_row.get('ai_model_ok'))|safe }}</td></tr>
-            <tr><th>ai_bear_detected</th><td>{{ status_pill(camera_row.get('ai_bear_detected'))|safe }}</td></tr>
-            <tr><th>ai_bear_approaching</th><td>{{ status_pill(camera_row.get('ai_bear_approaching'))|safe }}</td></tr>
-            <tr><th>ai_bear_confidence</th><td>{{ camera_row.get('ai_bear_confidence') }}</td></tr>
-            <tr><th>ai_bear_box_area_ratio</th><td>{{ camera_row.get('ai_bear_box_area_ratio') }}</td></tr>
-            <tr><th>inference_time_ms</th><td>{{ camera_row.get('inference_time_ms') }}</td></tr>
-            <tr><th>frame_brightness</th><td>{{ camera_frame_stats.get('brightness_mean', '-') }}</td></tr>
-            <tr><th>frame_age_sec</th><td>{{ camera_frame_stats.get('age_sec', '-') }}</td></tr>
-            <tr><th>camera_device</th><td>{{ camera_row.get('camera_device') }}</td></tr>
+            <tr><th>timestamp</th><td data-live-key="camera.timestamp">{{ camera_row.get('timestamp') }}</td></tr>
+            <tr><th>event</th><td data-live-key="camera.event">{{ camera_row.get('event') }}</td></tr>
+            <tr><th>ai_camera_status / AI Camera Status / AIカメラ状態</th><td data-live-key="camera.ai_camera_status">{{ camera_row.get('ai_camera_status') }}</td></tr>
+            <tr><th>ai_camera_ok</th><td data-live-key="camera.ai_camera_ok" data-live-bool="1">{{ status_pill(camera_row.get('ai_camera_ok'))|safe }}</td></tr>
+            <tr><th>ai_model_ok</th><td data-live-key="camera.ai_model_ok" data-live-bool="1">{{ status_pill(camera_row.get('ai_model_ok'))|safe }}</td></tr>
+            <tr><th>ai_bear_detected</th><td data-live-key="camera.ai_bear_detected" data-live-bool="1">{{ status_pill(camera_row.get('ai_bear_detected'))|safe }}</td></tr>
+            <tr><th>ai_bear_confidence</th><td data-live-key="camera.ai_bear_confidence">{{ camera_row.get('ai_bear_confidence') }}</td></tr>
+            <tr><th>ai_bear_box_area_ratio</th><td data-live-key="camera.ai_bear_box_area_ratio">{{ camera_row.get('ai_bear_box_area_ratio') }}</td></tr>
+            <tr><th>inference_time_ms</th><td data-live-key="camera.inference_time_ms">{{ camera_row.get('inference_time_ms') }}</td></tr>
+            <tr><th>frame_brightness</th><td data-live-key="frame.brightness_mean">{{ camera_frame_stats.get('brightness_mean', '-') }}</td></tr>
+            <tr><th>frame_age_sec</th><td data-live-key="frame.age_sec">{{ camera_frame_stats.get('age_sec', '-') }}</td></tr>
+            <tr><th>camera_device</th><td data-live-key="camera.camera_device">{{ camera_row.get('camera_device') }}</td></tr>
           </table>
         {% else %}
           <p>No Camera AI log data found yet.</p>
@@ -363,42 +377,47 @@ HTML_TEMPLATE = """
       <section class="decision">
         <h2>Feeding Safety Decision</h2>
         {% if row %}
+          <div class="release-action">
+            <div class="decision-label">Release Notice / 排出表示</div>
+            <div class="release-action-main" data-live-key="row.release_action_message">{{ row.get('release_action_message') }}</div>
+            <div class="muted" data-live-key="row.release_rate_limit_message">{{ row.get('release_rate_limit_message') }}</div>
+          </div>
           <div class="decision-grid">
             <div class="decision-item">
               <div class="decision-label">Current State</div>
-              <div class="decision-value">{{ row.get('presentation_state', row.get('state', '-')) }}</div>
+              <div class="decision-value" data-live-key="row.presentation_state">{{ row.get('presentation_state', row.get('state', '-')) }}</div>
             </div>
             <div class="decision-item">
-              <div class="decision-label">Camera Status</div>
-              <div class="decision-value">{{ row.get('camera_status', '-') }}</div>
+              <div class="decision-label">AI Camera Status / AIカメラ状態</div>
+              <div class="decision-value" data-live-key="row.camera_status">{{ row.get('camera_status', '-') }}</div>
             </div>
             <div class="decision-item">
-              <div class="decision-label">Bear Detection</div>
-              <div class="decision-value">{{ row.get('bear_detected', '-') }}</div>
+              <div class="decision-label">Bear Detection / 熊検出</div>
+              <div class="decision-value" data-live-key="row.bear_detected">{{ row.get('bear_detected', '-') }}</div>
             </div>
             <div class="decision-item">
               <div class="decision-label">Confidence</div>
-              <div class="decision-value">{{ row.get('confidence', '-') }}</div>
+              <div class="decision-value" data-live-key="row.confidence">{{ row.get('confidence', '-') }}</div>
             </div>
             <div class="decision-item">
               <div class="decision-label">Contact Pad</div>
-              <div class="decision-value">{{ 'Confirmed' if truthy(row.get('contact_confirmed')) else 'Waiting' }}</div>
+              <div class="decision-value" data-live-key="row.contact_confirmed" data-live-format="confirmed_waiting">{{ 'Confirmed' if truthy(row.get('contact_confirmed')) else 'Waiting' }}</div>
             </div>
             <div class="decision-item">
               <div class="decision-label">Safety Decision</div>
-              <div class="decision-value">{{ row.get('safety_decision', row.get('event', '-')) }}</div>
+              <div class="decision-value" data-live-key="row.safety_decision">{{ row.get('safety_decision', row.get('event', '-')) }}</div>
             </div>
             <div class="decision-item">
-              <div class="decision-label">Servo Command</div>
-              <div class="decision-value">{{ row.get('servo_command', row.get('release_state', 'HOLD')) }}</div>
+              <div class="decision-label">Servo Command / サーボ命令</div>
+              <div class="decision-value" data-live-key="row.servo_command">{{ row.get('servo_command', row.get('release_state', 'HOLD')) }}</div>
             </div>
             <div class="decision-item">
               <div class="decision-label">CSV Log</div>
-              <div class="decision-value">{{ row.get('log_status', 'SAVED') }}</div>
+              <div class="decision-value" data-live-key="row.log_status">{{ row.get('log_status', 'SAVED') }}</div>
             </div>
             <div class="decision-item">
               <div class="decision-label">Input Mode</div>
-              <div class="decision-value">{{ row.get('input_mode', 'ARDUINO_SERIAL') }}</div>
+              <div class="decision-value" data-live-key="row.input_mode">{{ row.get('input_mode', 'ARDUINO_SERIAL') }}</div>
             </div>
           </div>
         {% else %}
@@ -450,11 +469,11 @@ HTML_TEMPLATE = """
         </div>
 
         <table class="demo-status-table">
-          <tr><th>Last command sent</th><td>{{ demo_status.get('last_command', 'STOP') }}</td></tr>
-          <tr><th>Command timestamp</th><td>{{ demo_status.get('command_timestamp') or '-' }}</td></tr>
-          <tr><th>Serial connection status</th><td>{{ demo_status.get('serial_status', 'NOT_CONNECTED') }}</td></tr>
-          <tr><th>Result</th><td>{{ demo_status.get('result', '-') }}</td></tr>
-          <tr><th>Message</th><td>{{ demo_status.get('message', '-') }}</td></tr>
+          <tr><th>Last command sent</th><td data-live-key="demo.last_command">{{ demo_status.get('last_command', 'STOP') }}</td></tr>
+          <tr><th>Command timestamp</th><td data-live-key="demo.command_timestamp">{{ demo_status.get('command_timestamp') or '-' }}</td></tr>
+          <tr><th>Serial connection status</th><td data-live-key="demo.serial_status">{{ demo_status.get('serial_status', 'NOT_CONNECTED') }}</td></tr>
+          <tr><th>Result</th><td data-live-key="demo.result">{{ demo_status.get('result', '-') }}</td></tr>
+          <tr><th>Message</th><td data-live-key="demo.message">{{ demo_status.get('message', '-') }}</td></tr>
         </table>
         <p class="muted">Demo command log: {{ demo_status.get('log_path', '') }}</p>
       </section>
@@ -608,19 +627,18 @@ HTML_TEMPLATE = """
         <h2>Safety Control Details</h2>
         {% if row %}
           <table>
-            <tr><th>timestamp</th><td>{{ row.get('timestamp') }}</td></tr>
-            <tr><th>state</th><td>{{ row.get('state') }}</td></tr>
-            <tr><th>event</th><td>{{ row.get('event') }}</td></tr>
-            <tr><th>release_state</th><td>{{ row.get('release_state') }}</td></tr>
-            <tr><th>bear_detected</th><td>{{ row.get('bear_detected') }}</td></tr>
-            <tr><th>bear_approaching</th><td>{{ row.get('bear_approaching', '') }}</td></tr>
-            <tr><th>contact_detected</th><td>{{ row.get('contact_detected', row.get('paw_contact', '')) }}</td></tr>
-            <tr><th>contact_confirmed</th><td>{{ row.get('contact_confirmed', '') }}</td></tr>
-            <tr><th>impedance_kohm</th><td>{{ row.get('impedance_kohm', row.get('raw_contact_value', '')) }}</td></tr>
-            <tr><th>honey_amount_percent</th><td>{{ row.get('honey_amount_percent') }}</td></tr>
-            <tr><th>system_safe</th><td>{{ row.get('system_safe') }}</td></tr>
-            <tr><th>emergency_stop</th><td>{{ row.get('emergency_stop') }}</td></tr>
-            <tr><th>error_code</th><td>{{ row.get('error_code') }}</td></tr>
+            <tr><th>timestamp</th><td data-live-key="row.timestamp">{{ row.get('timestamp') }}</td></tr>
+            <tr><th>state</th><td data-live-key="row.state">{{ row.get('state') }}</td></tr>
+            <tr><th>event</th><td data-live-key="row.event">{{ row.get('event') }}</td></tr>
+            <tr><th>release_state</th><td data-live-key="row.release_state">{{ row.get('release_state') }}</td></tr>
+            <tr><th>bear_detected</th><td data-live-key="row.bear_detected">{{ row.get('bear_detected') }}</td></tr>
+            <tr><th>contact_detected</th><td data-live-key="row.contact_detected">{{ row.get('contact_detected', row.get('paw_contact', '')) }}</td></tr>
+            <tr><th>contact_confirmed</th><td data-live-key="row.contact_confirmed">{{ row.get('contact_confirmed', '') }}</td></tr>
+            <tr><th>impedance_kohm</th><td data-live-key="row.impedance_kohm">{{ row.get('impedance_kohm', row.get('raw_contact_value', '')) }}</td></tr>
+            <tr><th>honey_amount_percent</th><td data-live-key="row.honey_amount_percent">{{ row.get('honey_amount_percent') }}</td></tr>
+            <tr><th>system_safe</th><td data-live-key="row.system_safe">{{ row.get('system_safe') }}</td></tr>
+            <tr><th>emergency_stop</th><td data-live-key="row.emergency_stop">{{ row.get('emergency_stop') }}</td></tr>
+            <tr><th>error_code</th><td data-live-key="row.error_code">{{ row.get('error_code') }}</td></tr>
           </table>
         {% else %}
           <p>No contact-pad log data found yet.</p>
@@ -638,65 +656,81 @@ HTML_TEMPLATE = """
         if (!isFinite(refreshInterval) || refreshInterval < 1) {
           refreshInterval = 2;
         }
-        var lastEstop = main.getAttribute("data-emergency-stop") === "1";
         var fetching = false;
 
         function refreshMain() {
           if (fetching) { return; }
           fetching = true;
-          fetch("/", { headers: { "X-Dashboard-Partial": "1" }, credentials: "same-origin" })
+          fetch("/api/dashboard-state", { credentials: "same-origin", cache: "no-store" })
             .then(function (response) {
               if (!response.ok) { throw new Error("HTTP " + response.status); }
-              return response.text();
+              return response.json();
             })
-            .then(function (html) {
-              var doc = new DOMParser().parseFromString(html, "text/html");
-              var newMain = doc.getElementById("dashboard-main");
-              if (newMain) {
-                replaceMainContent(newMain);
-                // Re-run inline scripts inside the fetched content.
-                main.querySelectorAll("script").forEach(function (oldScript) {
-                  var script = document.createElement("script");
-                  if (oldScript.src) {
-                    script.src = oldScript.src;
-                  } else {
-                    script.textContent = oldScript.textContent;
-                  }
-                  main.appendChild(script);
-                  script.remove();
-                });
-                var estop = main.getAttribute("data-emergency-stop") === "1";
-                lastEstop = estop;
-              }
-            })
+            .then(updateDashboardState)
             .catch(function () { /* ignore transient fetch errors */ })
             .finally(function () { fetching = false; });
         }
 
-        function replaceMainContent(newMain) {
-          var currentCameraStream = main.querySelector('[data-camera-stream]');
-          var newCameraStream = newMain.querySelector('[data-camera-stream]');
-          if (currentCameraStream && newCameraStream) {
-            newCameraStream.replaceWith(currentCameraStream);
-          }
-
-          Array.prototype.slice.call(main.attributes).forEach(function (attribute) {
-            main.removeAttribute(attribute.name);
+        function updateDashboardState(data) {
+          data = data || {};
+          var demo = data.demo_status || {};
+          main.setAttribute("data-demo-enabled", truthy(demo.demo_enabled) ? "1" : "0");
+          main.setAttribute("data-emergency-stop", truthy(demo.emergency_stop) ? "1" : "0");
+          main.querySelectorAll("[data-live-key]").forEach(function (node) {
+            var value = valueForKey(data, node.getAttribute("data-live-key"));
+            if (node.getAttribute("data-live-bool") === "1") {
+              node.innerHTML = statusPill(value);
+            } else if (node.getAttribute("data-live-format") === "confirmed_waiting") {
+              node.textContent = truthy(value) ? "Confirmed" : "Waiting";
+            } else {
+              node.textContent = displayValue(value);
+            }
           });
-          Array.prototype.slice.call(newMain.attributes).forEach(function (attribute) {
-            main.setAttribute(attribute.name, attribute.value);
-          });
+          updateDemoButtons();
+        }
 
-          if (main.replaceChildren) {
-            main.replaceChildren.apply(main, Array.prototype.slice.call(newMain.childNodes));
-            return;
+        function valueForKey(data, key) {
+          var parts = (key || "").split(".");
+          var roots = {
+            row: data.row || {},
+            camera: data.camera_row || {},
+            frame: data.camera_frame_stats || {},
+            demo: data.demo_status || {},
+            motor: data.motor_status || {}
+          };
+          var value = roots[parts[0]];
+          for (var index = 1; index < parts.length; index += 1) {
+            if (value == null) { return ""; }
+            value = value[parts[index]];
           }
+          return value;
+        }
 
-          while (main.firstChild) {
-            main.removeChild(main.firstChild);
+        function displayValue(value) {
+          if (value === undefined || value === null || value === "") {
+            return "-";
           }
-          Array.prototype.slice.call(newMain.childNodes).forEach(function (node) {
-            main.appendChild(node);
+          return String(value);
+        }
+
+        function truthy(value) {
+          return ["1", "true", "yes", "on"].indexOf(String(value).trim().toLowerCase()) !== -1;
+        }
+
+        function statusPill(value) {
+          if (value === undefined || value === null || value === "") {
+            return '<span class="pill warn">unknown</span>';
+          }
+          return truthy(value)
+            ? '<span class="pill ok">true</span>'
+            : '<span class="pill error">false</span>';
+        }
+
+        function updateDemoButtons() {
+          var enabled = main.getAttribute("data-demo-enabled") === "1";
+          main.querySelectorAll('input[name="command"][value="RELEASE"], input[name="command"][value="TEST"]').forEach(function (input) {
+            var button = input.closest("form").querySelector('button[type="submit"]');
+            if (button) { button.disabled = !enabled; }
           });
         }
 
@@ -724,23 +758,6 @@ HTML_TEMPLATE = """
           }).then(function () { return true; }).catch(function () { return false; });
         }
 
-        function bindForms(root) {
-          var forms = root.querySelectorAll('form[data-demo-control]');
-          forms.forEach(function (form) {
-            form.addEventListener("submit", function (event) {
-              event.preventDefault();
-              var btn = form.querySelector('button[type="submit"]');
-              if (btn) { btn.disabled = true; }
-              submitForm(form).then(function () {
-                refreshMain();
-                setTimeout(function () {
-                  if (btn) { btn.disabled = false; }
-                }, 300);
-              });
-            });
-          });
-        }
-
         document.addEventListener("submit", function (event) {
           var form = event.target;
           if (form && form.hasAttribute('data-demo-control')) {
@@ -756,7 +773,7 @@ HTML_TEMPLATE = """
           }
         });
 
-        bindForms(document);
+        updateDemoButtons();
         setInterval(refreshMain, refreshInterval * 1000);
       })();
     </script>
@@ -810,6 +827,56 @@ def load_latest_row(log_path: Path) -> Optional[dict]:
     return latest
 
 
+def parse_log_timestamp(value: object) -> Optional[datetime]:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).strip())
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=JST)
+    return parsed
+
+
+def load_camera_display_row(
+    log_path: Path,
+    *,
+    transient_error_window_sec: float = 10.0,
+) -> Optional[dict]:
+    if not log_path.exists():
+        return None
+
+    try:
+        with log_path.open("r", newline="", encoding="utf-8") as csv_file:
+            rows = list(csv.DictReader(csv_file))
+    except (OSError, csv.Error):
+        return None
+    if not rows:
+        return None
+
+    latest = rows[-1]
+    if truthy(latest.get("ai_camera_ok")):
+        return latest
+
+    latest_timestamp = parse_log_timestamp(latest.get("timestamp"))
+    if latest_timestamp is None:
+        return latest
+
+    for candidate in reversed(rows[:-1]):
+        if not truthy(candidate.get("ai_camera_ok")):
+            continue
+        candidate_timestamp = parse_log_timestamp(candidate.get("timestamp"))
+        if candidate_timestamp is None:
+            continue
+        age_sec = (latest_timestamp - candidate_timestamp).total_seconds()
+        if 0 <= age_sec <= transient_error_window_sec:
+            return candidate
+        if age_sec > transient_error_window_sec:
+            break
+    return latest
+
+
 def truthy(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
@@ -820,6 +887,72 @@ def status_pill(value: object) -> str:
     css_class = "ok" if truthy(value) else "error"
     label = "true" if truthy(value) else "false"
     return f'<span class="pill {css_class}">{label}</span>'
+
+
+def has_value(value: object) -> bool:
+    return value is not None and str(value).strip() != ""
+
+
+def describe_ai_camera_status(camera_row: dict) -> str:
+    if not camera_row:
+        return "Waiting for Camera AI / Camera AI待機中"
+
+    event = str(camera_row.get("event", "")).strip().upper()
+    camera_ok = camera_row.get("ai_camera_ok")
+    model_ok = camera_row.get("ai_model_ok")
+    bear_detected = camera_row.get("ai_bear_detected")
+
+    if has_value(camera_ok) and not truthy(camera_ok):
+        return "Camera error / カメラ異常"
+    if has_value(model_ok) and not truthy(model_ok):
+        return "Model not ready / モデル未準備"
+    if truthy(bear_detected) or "AI_BEAR_DETECTED" in event:
+        return "Detected / 検出済み"
+    if has_value(bear_detected) or "AI_NO_BEAR" in event:
+        return "No bear detected / 熊未検出"
+    return "Camera AI running / Camera AI動作中"
+
+
+def describe_safety_camera_status(row: dict) -> str:
+    if not row:
+        return "Waiting for safety log / 安全ログ待機中"
+
+    raw_status = str(row.get("camera_status", "")).strip().upper()
+    if "ERROR" in raw_status or str(row.get("state", "")).strip() == "ERROR_SAFE":
+        return "Camera error / カメラ異常"
+    if "SIMULATED" in raw_status or str(row.get("input_mode", "")).strip() == "scenario":
+        return "Simulated input / シミュレーション入力"
+    if truthy(row.get("bear_detected")):
+        return "Detected / 検出済み"
+    return "No bear detected / 熊未検出"
+
+
+def describe_release_action(row: dict) -> str:
+    if not row:
+        return "Standby / 待機中"
+
+    release_state = str(row.get("release_state", "")).strip().upper()
+    servo_command = str(row.get("servo_command", "")).strip().upper()
+    if release_state == "RELEASE_ON" or servo_command == "RELEASE":
+        return "Detected → Dispensing / 検出済み➡排出します"
+    if truthy(row.get("bear_detected")):
+        return "Detected → Safety check / 検出済み➡安全確認中"
+    return "No detection → Standby / 未検出➡待機中"
+
+
+def enrich_display_rows(row: Optional[dict], camera_row: Optional[dict]) -> tuple[dict, dict]:
+    display_row = dict(row or {})
+    display_camera_row = dict(camera_row or {})
+
+    display_camera_row["ai_camera_status"] = describe_ai_camera_status(
+        display_camera_row
+    )
+    display_row["camera_status"] = describe_safety_camera_status(display_row)
+    display_row["release_action_message"] = describe_release_action(display_row)
+    display_row["release_rate_limit_message"] = (
+        "Rate limit: maximum once per 10 seconds / 動作上限: 10秒に1回"
+    )
+    return display_row, display_camera_row
 
 
 def stream_latest_jpeg_frames(camera_frame_path: Path, *, max_fps: float = 5.0):
@@ -1224,8 +1357,7 @@ def create_app(
     )
     motor_controller = MotorDriverController(Path(motor_driver_config_file))
 
-    @app.route("/")
-    def index():
+    def dashboard_state() -> dict:
         chosen_camera_log = Path(resolved_camera_log_file)
         chosen_log = (
             Path(resolved_log_file)
@@ -1239,26 +1371,48 @@ def create_app(
             )
         )
         row = load_latest_row(chosen_log) if chosen_log else None
-        camera_row = load_latest_row(chosen_camera_log) if chosen_camera_log else None
+        camera_row = load_camera_display_row(chosen_camera_log) if chosen_camera_log else None
+        display_row, display_camera_row = enrich_display_rows(row, camera_row)
         camera_frame_path = debug_frame_dir / camera_frame_file
         frame_stats = camera_frame_stats(camera_frame_path)
         motor_status = motor_controller.get_status()
         motor_config = motor_controller.config.to_dict()
+        return {
+            "row": display_row,
+            "log_path": str(chosen_log) if chosen_log else "",
+            "camera_row": display_camera_row,
+            "camera_log_path": str(chosen_camera_log) if chosen_camera_log else "",
+            "camera_frame_path": str(camera_frame_path),
+            "camera_frame_available": camera_frame_path.exists(),
+            "camera_frame_stats": frame_stats,
+            "refresh_interval": refresh_interval,
+            "demo_status": demo_service.status(),
+            "motor_status": motor_status.to_dict(),
+            "motor_config": motor_config,
+        }
+
+    @app.route("/")
+    def index():
+        state = dashboard_state()
         return render_template_string(
             HTML_TEMPLATE,
-            row=row,
-            log_path=str(chosen_log) if chosen_log else "",
-            camera_row=camera_row,
-            camera_log_path=str(chosen_camera_log) if chosen_camera_log else "",
-            camera_frame_path=str(camera_frame_path),
-            camera_frame_available=camera_frame_path.exists(),
-            camera_frame_stats=frame_stats,
+            row=state["row"],
+            log_path=state["log_path"],
+            camera_row=state["camera_row"],
+            camera_log_path=state["camera_log_path"],
+            camera_frame_path=state["camera_frame_path"],
+            camera_frame_available=state["camera_frame_available"],
+            camera_frame_stats=state["camera_frame_stats"],
             cache_buster=time.time_ns(),
             refresh_interval=refresh_interval,
-            demo_status=demo_service.status(),
-            motor_status=motor_status.to_dict(),
-            motor_config=motor_config,
+            demo_status=state["demo_status"],
+            motor_status=state["motor_status"],
+            motor_config=state["motor_config"],
         )
+
+    @app.route("/api/dashboard-state")
+    def api_dashboard_state():
+        return jsonify(dashboard_state())
 
     @app.route("/camera/latest.jpg")
     def camera_frame():

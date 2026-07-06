@@ -4,7 +4,7 @@
 
 このリポジトリは、A1 **Bear Honey Buffet** ハッカソンプロジェクトにおける **Front Paw Contact Pad System** のプロトタイプを扱う。
 
-現在のプロトタイプは、疑似入力・接触パッド制御に加えて、Raspberry Pi のカメラAI認識モジュールを含む。熊または対象物の接近を検知し、前足接触または将来の電気抵抗/接触パッド入力を確認し、蜂蜜量と安全状態を確認したうえで、蜂蜜放出信号を安全に判断する。
+現在のプロトタイプは、疑似入力・接触パッド制御に加えて、Raspberry Pi のカメラAI認識モジュールを含む。熊または対象物の存在を検知し、前足接触または将来の電気抵抗/接触パッド入力を確認し、蜂蜜量と安全状態を確認したうえで、蜂蜜放出信号を安全に判断する。
 
 カメラAIは追加の認識レイヤーであり、単独の安全制御器ではない。YOLO検出だけで蜂蜜を放出してはいけない。
 
@@ -20,7 +20,7 @@ A1システム全体は、4つのレイヤーに分ける。
 [Bear]
   ↓
 [Camera AI perception layer]
-  ↓ ai_bear_approaching
+  ↓ ai_bear_detected
 [Contact / resistance confirmation layer]
   ↓ paw_contact / raw_contact_value
 [Safety decision layer]
@@ -39,7 +39,7 @@ A1システム全体は、4つのレイヤーに分ける。
 本システムは、以下を確認する。
 
 ```text
-1. 熊または対象物が接近しているか        ai_bear_approaching / bear_detected
+1. 熊または対象物を検知しているか        ai_bear_detected / bear_detected
 2. 前足が接触パッドに触れているか          paw_contact / raw_contact_value
 3. 蜂蜜量は十分か                          honey_amount_percent
 4. システムは安全状態か                    system_safe
@@ -79,7 +79,7 @@ Arduino Uno は、現場側の接触確認・安全制御基板として残す�
 - serial または network 通信
 ```
 
-Arduino Uno / 電気抵抗測定 / 接触パッドロジックは、今後も削除せず文書と実装に残す。camera AI は `ai_bear_approaching` を追加できるが、`paw_contact`、`raw_contact_value`、接触しきい値、緊急停止、RELEASE_OFF フェイルセーフを置き換えない。
+Arduino Uno / 電気抵抗測定 / 接触パッドロジックは、今後も削除せず文書と実装に残す。camera AI は `ai_bear_detected` を追加できるが、`paw_contact`、`raw_contact_value`、接触しきい値、緊急停止、RELEASE_OFF フェイルセーフを置き換えない。
 
 Arduino Uno は、低レイテンシなGPIO制御とUSBシリアル通信により、現場側のフェイルセーフ制御に使う。
 
@@ -99,8 +99,8 @@ Raspberry Pi 4B 4GB は、AIカメラ認識、ログ記録、上位側の状態�
 ```text
 - BUFFALO BSW500M USBカメラから画像を取得
 - OpenCV / V4L2 でカメラキャプチャ
-- 軽量YOLOで熊接近を検出
-- ai_bear_approaching 状態を出力
+- 軽量YOLOで熊を検出
+- ai_bear_detected 状態を出力
 - Arduino Uno から状態データを受信
 - CSVログ保存
 - ダッシュボード表示
@@ -147,11 +147,11 @@ BUFFALO BSW500M USB Camera
 Raspberry Pi 4B 4GB
   - OpenCV / V4L2 camera capture
   - YOLO bear detection
-  - bear approach judgement
+  - bear detection judgement
   - JSON Lines / CSV logging
   ↓
 Existing decision logic
-  - ai_bear_approaching
+  - ai_bear_detected
   - paw_contact / resistance measurement
   - honey_amount_percent
   - system_safe
@@ -174,7 +174,7 @@ Honey release mechanism
 
 ```text
 simulated_bear_detected
-ai_bear_approaching
+ai_bear_detected
 simulated_paw_contact
 raw_contact_value
 simulated_honey_amount_percent
@@ -186,7 +186,7 @@ emergency_stop
 
 ```text
 release_allowed = (
-    ai_bear_approaching
+    ai_bear_detected
     and paw_contact
     and honey_amount_percent >= honey_min_threshold_percent
     and system_safe
@@ -268,7 +268,7 @@ IDLE
 
 ```python
 release_allowed = (
-    ai_bear_approaching
+    ai_bear_detected
     and paw_contact
     and honey_amount_percent >= honey_min_threshold_percent
     and system_safe
@@ -302,7 +302,7 @@ timestamp,bear_detected,paw_contact,honey_amount_percent,system_safe,emergency_s
 Camera AI も Raspberry Pi から JSON Lines を出力する。
 
 ```json
-{"source":"camera_ai","ai_camera_ok":true,"ai_model_ok":true,"ai_bear_detected":true,"ai_bear_confidence":0.82,"ai_bear_box_area_ratio":0.18,"ai_bear_approaching":true,"event":"AI_BEAR_APPROACHING"}
+{"source":"camera_ai","ai_camera_ok":true,"ai_model_ok":true,"ai_bear_detected":true,"ai_bear_confidence":0.82,"ai_bear_box_area_ratio":0.18,"event":"AI_BEAR_DETECTED"}
 ```
 
 これらの camera AI フィールドは、安全判定レイヤーへの入力であり、直接 `RELEASE_ON` を命令するものではない。
@@ -385,7 +385,7 @@ Arduino/contact-pad 側から移動するものではない。
 - フォールバックモデルパス: models/yolo_bear.pt
 - Raspberry Pi 4B 推奨解像度: 320x240
 - 推奨FourCC: まずMJPG、失敗時にYUYV
-- 失敗時の挙動: ai_bear_approaching=false
+- 失敗時の挙動: ai_bear_detected=false
 ```
 
 設定されたモデルがすべて無い場合、`AI_MODEL_LOAD_ERROR` を出力し、`ai_model_ok=false` としてフェイルセーフを維持する。
@@ -473,7 +473,7 @@ fuser -v /dev/video0
 | `arduino_uno_q/contact_pad_controller/` | Arduino Uno のメイン制御。疑似入力、接触パッド状態遷移、蜂蜜量しきい値判定、RELEASE_ON/OFF出力、LED/GPIO、JSON Lines出力を担当する。 |
 | `raspberry_pi/logger/` | Raspberry Pi 側のシリアルロガー。ArduinoとAIのJSON Linesを受信し、CSVログに保存する。 |
 | `raspberry_pi/dashboard/` | デモ・監視用ダッシュボード。接触状態、AI状態、放出状態をまとめて表示する。 |
-| `raspberry_pi/camera_ai/` | 任意のカメラAI知覚レイヤー。`/dev/video0` のカメラテスト、YOLO読み込み、熊接近推定、AI状態出力を担当する。ただし蜂蜜放出を直接命令してはいけない。 |
+| `raspberry_pi/camera_ai/` | 任意のカメラAI知覚レイヤー。`/dev/video0` のカメラテスト、YOLO読み込み、熊検出、AI状態出力を担当する。ただし蜂蜜放出を直接命令してはいけない。 |
 | `docs/` | ブロック図、状態遷移図、インターフェース仕様、camera AI設計メモなどの設計資料。 |
 | `data/logs/` | 実行時のCSV/JSONLログ置き場。小さなサンプル以外の生成ログは通常Gitに入れない。 |
 | `examples/` | デモや説明用の小さなサンプル入出力。 |
@@ -511,7 +511,7 @@ fuser -v /dev/video0
 [ ] models/yolo_bear_ncnn_model を配置または書き出し
 [ ] AI_MODEL_LOAD_ERROR が消えることを確認
 [ ] カメラ画像に対してYOLO推論を実行
-[ ] ai_bear_approaching をフェイルセーフに出力
+[ ] ai_bear_detected をフェイルセーフに出力
 ```
 
 ### Phase 4: AI状態ログとダッシュボード統合
@@ -519,7 +519,7 @@ fuser -v /dev/video0
 ```text
 [ ] camera AI JSON Lines / CSV を記録
 [ ] ai_camera_ok と ai_model_ok を表示
-[ ] ai_bear_detected と ai_bear_approaching を表示
+[ ] ai_camera_ok、ai_model_ok、ai_bear_detected を表示
 [ ] 接触状態と放出状態を同じ画面に表示
 ```
 
@@ -544,7 +544,7 @@ fuser -v /dev/video0
 ### Phase 7: フェイルセーフ付き全体デモ
 
 ```text
-[ ] Camera AI が接近を検出
+[ ] Camera AI が熊を検出
 [ ] 接触/抵抗レイヤーが paw_contact を確認
 [ ] 蜂蜜量と安全状態の条件を満たす
 [ ] 緊急停止で RELEASE_OFF に強制移行
@@ -557,7 +557,7 @@ fuser -v /dev/video0
 
 ```text
 I will develop the front paw contact pad system as a separate electronic/control module.
-Raspberry Pi 4B with a BUFFALO BSW500M camera will be used for YOLO-based bear approach detection, logging, and dashboard support.
+Raspberry Pi 4B with a BUFFALO BSW500M camera will be used for YOLO-based bear detection, logging, and dashboard support.
 Arduino Uno and the contact/resistance layer remain responsible for contact confirmation and fail-safe release logic.
 PCA9685 and a servo motor will be used on the honey release mechanism side.
 Camera AI is an additional perception layer, not the only safety controller.
@@ -585,7 +585,7 @@ Camera AI is an additional perception layer, not the only safety controller.
 [ ] Uno が疑似入力を生成できる
 [ ] Uno が RELEASE_ON/OFF を判断できる
 [ ] Raspberry Pi が /dev/video0 から画像取得できる
-[ ] Camera AI がフェイルセーフな ai_bear_approaching を出力できる
+[ ] Camera AI がフェイルセーフな ai_bear_detected を出力できる
 [ ] LEDまたはserialで RELEASE_ON/OFF が見える
 [ ] Raspberry Pi が状態データを受信できる
 [ ] Raspberry Pi がCSVログを保存できる
@@ -890,4 +890,4 @@ CSVカラム: `timestamp`, `command`, `serial_command`, `demo_enabled`,
 
 ## 一文要約
 
-このプロジェクトでは、Raspberry Pi 4B と BUFFALO BSW500M USBカメラを用いてYOLOによる熊接近検出を行い、従来のArduino/接触パッド系の安全判定を残したまま、AI検知・接触確認・蜂蜜量・安全状態を満たした場合のみ蜂蜜放出を許可する。
+このプロジェクトでは、Raspberry Pi 4B と BUFFALO BSW500M USBカメラを用いてYOLOによる熊検出を行い、従来のArduino/接触パッド系の安全判定を残したまま、AI検知・接触確認・蜂蜜量・安全状態を満たした場合のみ蜂蜜放出を許可する。

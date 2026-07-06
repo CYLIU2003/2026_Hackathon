@@ -16,12 +16,11 @@ def bear_detection(confidence=0.82, box_area_ratio=0.18):
     }
 
 
-def test_no_bear_is_not_approaching():
+def test_no_bear_is_not_detected():
     logic = ApproachLogic(ApproachDetectionConfig())
     decision = logic.update([], now_monotonic=1.0)
 
     assert decision.ai_bear_detected is False
-    assert decision.ai_bear_approaching is False
     assert decision.event == "AI_NO_BEAR"
 
 
@@ -30,10 +29,9 @@ def test_low_confidence_is_fail_safe_false():
     decision = logic.update([bear_detection(confidence=0.49)], now_monotonic=1.0)
 
     assert decision.ai_bear_detected is False
-    assert decision.ai_bear_approaching is False
 
 
-def test_small_bbox_detected_but_not_approaching():
+def test_small_bbox_detected_is_enough_for_demo():
     logic = ApproachLogic(
         ApproachDetectionConfig(
             confidence_threshold=0.5,
@@ -43,21 +41,20 @@ def test_small_bbox_detected_but_not_approaching():
     decision = logic.update([bear_detection(box_area_ratio=0.05)], now_monotonic=1.0)
 
     assert decision.ai_bear_detected is True
-    assert decision.ai_bear_approaching is False
     assert decision.event == "AI_BEAR_DETECTED"
 
 
-def test_consecutive_large_bbox_becomes_approaching():
+def test_detected_bear_does_not_wait_for_consecutive_approach():
     logic = ApproachLogic(ApproachDetectionConfig(consecutive_required=3))
 
     first = logic.update([bear_detection()], now_monotonic=1.0)
     second = logic.update([bear_detection()], now_monotonic=1.5)
     third = logic.update([bear_detection()], now_monotonic=2.0)
 
-    assert first.ai_bear_approaching is False
-    assert second.ai_bear_approaching is False
-    assert third.ai_bear_approaching is True
-    assert third.event == "AI_BEAR_APPROACHING"
+    assert first.ai_bear_detected is True
+    assert second.ai_bear_detected is True
+    assert third.ai_bear_detected is True
+    assert third.event == "AI_BEAR_DETECTED"
 
 
 def test_detection_age_gap_resets_consecutive_count():
@@ -70,5 +67,4 @@ def test_detection_age_gap_resets_consecutive_count():
 
     assert first.consecutive_count == 1
     assert second.consecutive_count == 1
-    assert second.ai_bear_approaching is False
-
+    assert second.ai_bear_detected is True

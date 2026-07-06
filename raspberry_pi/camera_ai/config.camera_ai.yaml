@@ -42,7 +42,7 @@ output:
   debug_frame_interval_sec: 0.2
 
 fail_safe:
-  default_ai_bear_approaching: false
+  default_ai_bear_detected: false
   dark_frame_mean_threshold: 30.0
   dark_frame_recovery_sec: 3.0
   camera_reopen_delay_sec: 1.0

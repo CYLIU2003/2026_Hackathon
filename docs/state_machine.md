@@ -18,7 +18,7 @@ Main flow:
 IDLE
   ↓ bear_detected
 BEAR_DETECTED
-  ↓ bear_approaching and paw_contact confirmed
+  ↓ paw_contact confirmed
 CONTACT_CONFIRMED
   ↓ honey enough and system safe
 READY_TO_RELEASE

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The camera AI module publishes a camera-derived bear approach signal from Raspberry Pi 4B.
+The camera AI module publishes a camera-derived bear detection signal from Raspberry Pi 4B.
 It is an additional perception layer and does not replace the contact pad, resistance/contact measurement, or Arduino Uno Q fail-safe release decision.
 
 ## JSON Lines Output
@@ -21,8 +21,7 @@ Required fields:
   "ai_bear_detected": true,
   "ai_bear_confidence": 0.82,
   "ai_bear_box_area_ratio": 0.18,
-  "ai_bear_approaching": true,
-  "event": "AI_BEAR_APPROACHING",
+  "event": "AI_BEAR_DETECTED",
   "inference_time_ms": 120.5
 }
 ```
@@ -32,7 +31,6 @@ Events:
 ```text
 AI_NO_BEAR
 AI_BEAR_DETECTED
-AI_BEAR_APPROACHING
 AI_CAMERA_OPEN_ERROR
 AI_CAMERA_FRAME_ERROR
 AI_MODEL_LOAD_ERROR
@@ -50,7 +48,7 @@ data/logs/camera_ai_log.csv
 Columns:
 
 ```csv
-timestamp,source,camera_device,ai_camera_ok,ai_model_ok,ai_bear_detected,ai_bear_confidence,ai_bear_box_area_ratio,ai_bear_approaching,event,inference_time_ms
+timestamp,source,camera_device,ai_camera_ok,ai_model_ok,ai_bear_detected,ai_bear_confidence,ai_bear_box_area_ratio,event,inference_time_ms
 ```
 
 Camera AI logs are separate from contact-pad logs.
@@ -60,7 +58,7 @@ Camera AI logs are separate from contact-pad logs.
 On camera failure, model failure, low confidence, timeout, or exception:
 
 ```text
-ai_bear_approaching=false
+ai_bear_detected=false
 ```
 
 This module must not directly set `release_state` to `RELEASE_ON`.
@@ -79,7 +77,7 @@ fallbacks:
 ```
 
 If no configured model path exists or the model cannot be loaded, emit
-`AI_MODEL_LOAD_ERROR` and keep `ai_bear_approaching=false`.
+`AI_MODEL_LOAD_ERROR` and keep `ai_bear_detected=false`.
 
 The runtime tries all existing configured model paths in order. This allows a
 transferred training result such as `models/yolo_bear.pt` to work even when the
@@ -101,7 +99,7 @@ Correct future integration style:
 
 ```python
 release_allowed = (
-    ai_bear_approaching
+    ai_bear_detected
     and paw_contact
     and honey_amount_percent >= honey_min_threshold_percent
     and system_safe

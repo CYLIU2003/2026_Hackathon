@@ -16,8 +16,8 @@
 [熊・対象物]
   ↓
 [Raspberry Pi / Camera AI]
-  - YOLOまたは仮想AIで熊接近を判定
-  - ai_bear_approaching を出力
+  - YOLOまたは仮想AIで熊検出を判定
+  - ai_bear_detected を出力
   ↓
 [Arduino Uno Q / Contact Pad Controller]
   - 前足接触・抵抗確認

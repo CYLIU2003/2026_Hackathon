@@ -39,7 +39,6 @@ JST = timezone(timedelta(hours=9))
 class FakeDetectionState:
     name: str
     ai_bear_detected: bool
-    ai_bear_approaching: bool
     paw_contact: bool
     honey_amount_percent: int
     system_safe: bool
@@ -63,12 +62,11 @@ def emit_jsonl(state: FakeDetectionState, step_index: int) -> None:
         "ai_bear_detected": state.ai_bear_detected,
         "ai_bear_confidence": 0.92 if state.ai_bear_detected else 0.0,
         "ai_bear_box_area_ratio": 0.22 if state.ai_bear_detected else 0.0,
-        "ai_bear_approaching": state.ai_bear_approaching,
         "paw_contact": state.paw_contact,
         "honey_amount_percent": state.honey_amount_percent,
         "system_safe": state.system_safe,
         "emergency_stop": state.emergency_stop,
-        "event": "AI_BEAR_APPROACHING" if state.ai_bear_approaching else "AI_IDLE",
+        "event": "AI_BEAR_DETECTED" if state.ai_bear_detected else "AI_NO_BEAR",
     }
     print(json.dumps(record, ensure_ascii=False), flush=True)
 
@@ -76,7 +74,7 @@ def emit_jsonl(state: FakeDetectionState, step_index: int) -> None:
 def serial_commands_for_state(state: FakeDetectionState) -> list[str]:
     commands = [
         "TEST_AUTO_OFF",
-        f"SET AI_BEAR {1 if state.ai_bear_approaching else 0}",
+        f"SET AI_BEAR {1 if state.ai_bear_detected else 0}",
         f"SET PAW {1 if state.paw_contact else 0}",
         f"SET HONEY {int(state.honey_amount_percent)}",
         f"SET SAFE {1 if state.system_safe else 0}",
@@ -123,7 +121,6 @@ def default_scenario() -> list[FakeDetectionState]:
         FakeDetectionState(
             name="idle_no_bear",
             ai_bear_detected=False,
-            ai_bear_approaching=False,
             paw_contact=False,
             honey_amount_percent=80,
             system_safe=True,
@@ -133,7 +130,6 @@ def default_scenario() -> list[FakeDetectionState]:
         FakeDetectionState(
             name="bear_detected_no_contact",
             ai_bear_detected=True,
-            ai_bear_approaching=True,
             paw_contact=False,
             honey_amount_percent=80,
             system_safe=True,
@@ -143,7 +139,6 @@ def default_scenario() -> list[FakeDetectionState]:
         FakeDetectionState(
             name="bear_detected_contact_release_allowed",
             ai_bear_detected=True,
-            ai_bear_approaching=True,
             paw_contact=True,
             honey_amount_percent=80,
             system_safe=True,
@@ -153,7 +148,6 @@ def default_scenario() -> list[FakeDetectionState]:
         FakeDetectionState(
             name="cooldown_no_contact",
             ai_bear_detected=True,
-            ai_bear_approaching=True,
             paw_contact=False,
             honey_amount_percent=80,
             system_safe=True,
@@ -163,7 +157,6 @@ def default_scenario() -> list[FakeDetectionState]:
         FakeDetectionState(
             name="honey_low_no_release",
             ai_bear_detected=True,
-            ai_bear_approaching=True,
             paw_contact=True,
             honey_amount_percent=10,
             system_safe=True,
@@ -173,7 +166,6 @@ def default_scenario() -> list[FakeDetectionState]:
         FakeDetectionState(
             name="emergency_stop_safe_close",
             ai_bear_detected=True,
-            ai_bear_approaching=True,
             paw_contact=True,
             honey_amount_percent=80,
             system_safe=True,

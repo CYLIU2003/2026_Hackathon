@@ -29,7 +29,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run camera AI bear approach detection.")
+    parser = argparse.ArgumentParser(description="Run camera AI bear detection.")
     parser.add_argument("--config", default="raspberry_pi/camera_ai/config.camera_ai.yaml")
     parser.add_argument(
         "--camera",
@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Skip YOLO inference and run in camera-only fail-safe mode. "
-            "Outputs ai_model_ok=false and ai_bear_approaching=false while still "
+            "Outputs ai_model_ok=false and ai_bear_detected=false while still "
             "capturing frames and writing CSV/JSONL/terminal status. Useful when "
             "the NCNN native library segfaults on the current platform."
         ),
@@ -202,7 +202,6 @@ def build_fail_safe_state(
         ai_bear_detected=False,
         ai_bear_confidence=None,
         ai_bear_box_area_ratio=None,
-        ai_bear_approaching=False,
         event=event,
         inference_time_ms=None,
     )
@@ -230,14 +229,12 @@ def format_terminal_status(record: dict) -> str:
     camera_status = "ok" if record.get("ai_camera_ok") else "error"
     model_status = "ok" if record.get("ai_model_ok") else "error"
     bear_status = "yes" if record.get("ai_bear_detected") else "no"
-    approaching_status = "yes" if record.get("ai_bear_approaching") else "no"
     return (
         f"{record.get('timestamp', '-')} "
         f"event={record.get('event', '-')} "
         f"camera={camera_status} "
         f"model={model_status} "
         f"bear={bear_status} "
-        f"approaching={approaching_status} "
         f"conf={format_optional_float(record.get('ai_bear_confidence'))} "
         f"area={format_optional_percent(record.get('ai_bear_box_area_ratio'))} "
         f"infer_ms={format_optional_float(record.get('inference_time_ms'), digits=1)} "
@@ -260,13 +257,10 @@ def draw_status_panel(cv2, frame, record: dict) -> None:
     event_label = {
         "AI_NO_BEAR": "NO_BEAR",
         "AI_BEAR_DETECTED": "BEAR",
-        "AI_BEAR_APPROACHING": "APPROACH",
     }.get(event, event)
     confidence = format_optional_float(record.get("ai_bear_confidence"))
     inference_ms = format_optional_float(record.get("inference_time_ms"), digits=1)
     line = f"{event_label} conf={confidence} infer={inference_ms}ms"
-    if record.get("ai_bear_approaching"):
-        line = f"{line} APPROACH"
     cv2.rectangle(frame, (0, 0), (frame.shape[1], 34), (0, 0, 0), thickness=-1)
     cv2.putText(
         frame,
@@ -412,6 +406,17 @@ def run_detection(detector: YoloBearDetector, frame) -> tuple[list[dict], float]
     return detections, inference_time_ms
 
 
+def camera_failure_is_transient(
+    *,
+    last_camera_ok_at: float | None,
+    now_monotonic: float,
+    grace_sec: float,
+) -> bool:
+    if last_camera_ok_at is None:
+        return False
+    return now_monotonic - last_camera_ok_at <= max(0.0, grace_sec)
+
+
 def run_camera_only_failsafe_loop(
     *,
     args,
@@ -422,10 +427,12 @@ def run_camera_only_failsafe_loop(
     latest_frame_name: str,
     debug_frame_interval_sec: float,
     output_config: dict,
+    camera_error_grace_sec: float,
+    initial_camera_ok: bool,
 ) -> int:
     """Camera-only fail-safe loop used when inference is disabled or unsafe.
 
-    Emits ai_model_ok=false and ai_bear_approaching=false on every cycle,
+    Emits ai_model_ok=false and ai_bear_detected=false on every cycle,
     keeps writing the latest camera frame, and never touches the YOLO model.
     This keeps the dashboard visually live while remaining in safe HOLD.
     """
@@ -436,7 +443,6 @@ def run_camera_only_failsafe_loop(
         ai_bear_detected=False,
         ai_bear_confidence=None,
         ai_bear_box_area_ratio=None,
-        ai_bear_approaching=False,
         event="AI_INFERENCE_DISABLED",
         inference_time_ms=None,
     )
@@ -444,10 +450,22 @@ def run_camera_only_failsafe_loop(
     last_record = failsafe_record
     last_debug_frame_saved_at = 0.0
     iteration_count = 0
+    last_camera_ok_at = time.monotonic() if initial_camera_ok else None
     try:
         while True:
             read_result = driver.read_frame()
             if not read_result.ok or read_result.frame is None:
+                now_monotonic = time.monotonic()
+                if (
+                    not args.once
+                    and camera_failure_is_transient(
+                        last_camera_ok_at=last_camera_ok_at,
+                        now_monotonic=now_monotonic,
+                        grace_sec=camera_error_grace_sec,
+                    )
+                ):
+                    time.sleep(0.05)
+                    continue
                 last_record = publish_state(
                     publisher,
                     build_fail_safe_state(
@@ -480,6 +498,7 @@ def run_camera_only_failsafe_loop(
             frame = read_result.frame
 
             now_monotonic = time.monotonic()
+            last_camera_ok_at = now_monotonic
             should_save_debug_frame = (
                 save_frames
                 and now_monotonic - last_debug_frame_saved_at >= debug_frame_interval_sec
@@ -503,7 +522,6 @@ def run_camera_only_failsafe_loop(
                     ai_bear_detected=False,
                     ai_bear_confidence=None,
                     ai_bear_box_area_ratio=None,
-                    ai_bear_approaching=False,
                     event="AI_INFERENCE_DISABLED",
                     inference_time_ms=None,
                 ),
@@ -603,7 +621,6 @@ def main() -> int:
                 ai_bear_detected=False,
                 ai_bear_confidence=None,
                 ai_bear_box_area_ratio=None,
-                ai_bear_approaching=False,
                 event="AI_MODEL_LOADING",
                 inference_time_ms=None,
             ).to_record(),
@@ -627,6 +644,10 @@ def main() -> int:
             latest_frame_name=latest_frame_name,
             debug_frame_interval_sec=debug_frame_interval_sec,
             output_config=output_config,
+            camera_error_grace_sec=float(
+                fail_safe_config.get("camera_error_grace_sec", 2.0)
+            ),
+            initial_camera_ok=startup_read.ok,
         )
 
     inference_config = config.get("inference", {})
@@ -666,13 +687,16 @@ def main() -> int:
         ai_bear_detected=False,
         ai_bear_confidence=None,
         ai_bear_box_area_ratio=None,
-        ai_bear_approaching=False,
         event="AI_WAITING_FOR_INFERENCE",
         inference_time_ms=None,
     ).to_record()
     last_debug_frame_saved_at = 0.0
     last_inference_completed_at = -inference_interval_sec
     inference_future: Future | None = None
+    camera_error_grace_sec = float(
+        fail_safe_config.get("camera_error_grace_sec", 2.0)
+    )
+    last_camera_ok_at = time.monotonic() if startup_read.ok else None
 
     executor = ThreadPoolExecutor(max_workers=1)
     try:
@@ -680,6 +704,17 @@ def main() -> int:
             read_result = driver.read_frame()
             camera_device = read_result.camera_device
             if not read_result.ok or read_result.frame is None:
+                now_monotonic = time.monotonic()
+                if (
+                    not args.once
+                    and camera_failure_is_transient(
+                        last_camera_ok_at=last_camera_ok_at,
+                        now_monotonic=now_monotonic,
+                        grace_sec=camera_error_grace_sec,
+                    )
+                ):
+                    time.sleep(0.05)
+                    continue
                 failure_record = publish_state(
                     publisher,
                     build_fail_safe_state(
@@ -707,6 +742,7 @@ def main() -> int:
             frame = read_result.frame
 
             now_monotonic = time.monotonic()
+            last_camera_ok_at = now_monotonic
             completed_inference = False
             if inference_future is not None and inference_future.done():
                 try:
@@ -734,7 +770,6 @@ def main() -> int:
                         ai_bear_detected=decision.ai_bear_detected,
                         ai_bear_confidence=decision.ai_bear_confidence,
                         ai_bear_box_area_ratio=decision.ai_bear_box_area_ratio,
-                        ai_bear_approaching=decision.ai_bear_approaching,
                         event=decision.event,
                         inference_time_ms=round(inference_time_ms, 2),
                     ),

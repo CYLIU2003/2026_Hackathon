@@ -52,7 +52,7 @@ This file is the quick index for where each kind of work should live.
 | `camera_test.py` | One-frame USB camera bring-up test |
 | `camera_capture.py` | OpenCV/V4L2 camera open and fallback profiles |
 | `bear_detector.py` | Ultralytics YOLO wrapper |
-| `approach_logic.py` | Bear approach decision rules |
+| `approach_logic.py` | Bear detection decision rules |
 | `ai_state_publisher.py` | JSON Lines and CSV output |
 | `config.camera_ai.yaml` | Camera, model, threshold, and output configuration |
 | `prepare_bear_training_data.py` | Public COCO/Open Images to YOLO dataset preparation |

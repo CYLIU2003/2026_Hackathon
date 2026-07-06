@@ -52,6 +52,20 @@ fi
 
 mkdir -p "${LOG_DIR}" data/debug_frames
 
+RUN_DEMO_LOCK_FILE="${RUN_DEMO_LOCK_FILE:-${LOG_DIR}/run_demo.lock}"
+RUN_DEMO_PID_FILE="${RUN_DEMO_PID_FILE:-${LOG_DIR}/run_demo.pid}"
+
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"${RUN_DEMO_LOCK_FILE}"
+  if ! flock -n 9; then
+    existing_pid="$(cat "${RUN_DEMO_PID_FILE}" 2>/dev/null || true)"
+    echo "Another run_demo.sh is already running${existing_pid:+ (pid ${existing_pid})}."
+    echo "Stop that process before starting a new demo, so /dev/video0 is not opened twice."
+    exit 2
+  fi
+fi
+printf '%s\n' "$$" > "${RUN_DEMO_PID_FILE}"
+
 child_pids=()
 
 resolve_camera_device() {
@@ -91,6 +105,7 @@ cleanup() {
     fi
   done
   wait 2>/dev/null || true
+  rm -f "${RUN_DEMO_PID_FILE}"
 }
 
 stop_demo() {

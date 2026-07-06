@@ -128,7 +128,7 @@ authoritative physical release controller.
 Key columns:
 
 ```csv
-timestamp,input_mode,state,presentation_state,event,camera_status,bear_detected,bear_approaching,confidence,bear_box_area_ratio,contact_detected,contact_confirmed,impedance_kohm,honey_amount_percent,system_safe,emergency_stop,safety_decision,release_state,servo_command,log_status,error_code
+timestamp,input_mode,state,presentation_state,event,camera_status,bear_detected,confidence,bear_box_area_ratio,contact_detected,contact_confirmed,impedance_kohm,honey_amount_percent,system_safe,emergency_stop,safety_decision,release_state,servo_command,log_status,error_code
 ```
 
 Presentation aliases:

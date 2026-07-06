@@ -5,6 +5,8 @@ from raspberry_pi.safety_control.safety_controller import (
     SafetyConfig,
     SafetyStateMachine,
     SensorSnapshot,
+    append_csv,
+    build_record,
 )
 
 
@@ -108,21 +110,44 @@ def test_missing_camera_data_is_fail_safe():
     assert decision["servo_command"] == "HOLD"
 
 
-def test_detected_bear_waits_for_approach_confirmation():
+def test_detected_bear_waits_for_contact_confirmation():
     machine = SafetyStateMachine(SafetyConfig.load(CONFIG_PATH))
 
     decision = machine.update(
         snapshot(
             bear_detected=True,
-            bear_approaching=False,
             contact_detected=True,
         ),
         1000,
     )
 
     assert decision["state"] == "BEAR_DETECTED"
-    assert decision["safety_decision"] == "WAIT_APPROACH"
+    assert decision["safety_decision"] == "WAIT_CONTACT"
     assert decision["servo_command"] == "HOLD"
+
+
+def test_camera_status_is_bilingual_for_detected_bear():
+    decision = {
+        "state": "BEAR_DETECTED",
+        "previous_state": "IDLE",
+        "event": "BEAR_DETECTED",
+        "contact_confirmed": False,
+        "honey_enough": True,
+        "release_allowed": False,
+        "safety_decision": "WAIT_CONTACT",
+        "release_state": "RELEASE_OFF",
+        "servo_command": "HOLD",
+        "error_code": "ERR_NONE",
+        "error_message": "",
+    }
+
+    record = build_record(
+        snapshot(bear_detected=True),
+        decision,
+        input_mode="camera",
+    )
+
+    assert record["camera_status"] == "Detected / 検出済み"
 
 
 def test_camera_input_requests_reset_once_after_data_recovers(tmp_path):
@@ -141,9 +166,9 @@ def test_camera_input_requests_reset_once_after_data_recovers(tmp_path):
     missing = source.read()
     camera_log.write_text(
         "ai_camera_ok,ai_model_ok,ai_bear_detected,"
-        "ai_bear_approaching,ai_bear_confidence,"
+        "ai_bear_confidence,"
         "ai_bear_box_area_ratio\n"
-        "true,true,true,true,0.86,0.18\n",
+        "true,true,true,0.86,0.18\n",
         encoding="utf-8",
     )
     recovered = source.read()
@@ -152,5 +177,42 @@ def test_camera_input_requests_reset_once_after_data_recovers(tmp_path):
     assert missing.source_ok is False
     assert recovered.reset_requested is True
     assert recovered.bear_detected is True
-    assert recovered.bear_approaching is True
     assert next_read.reset_requested is False
+
+
+def test_safety_log_rotates_legacy_schema_before_writing(tmp_path):
+    csv_path = tmp_path / "feeding_decision_log.csv"
+    csv_path.write_text(
+        "timestamp,bear_detected,bear_approaching,release_state\n"
+        "2026-07-06T00:00:00+09:00,true,true,RELEASE_OFF\n",
+        encoding="utf-8",
+    )
+
+    append_csv(
+        csv_path,
+        build_record(
+            snapshot(bear_detected=True),
+            {
+                "state": "BEAR_DETECTED",
+                "previous_state": "IDLE",
+                "event": "BEAR_DETECTED",
+                "contact_confirmed": False,
+                "honey_enough": True,
+                "release_allowed": False,
+                "safety_decision": "WAIT_CONTACT",
+                "release_state": "RELEASE_OFF",
+                "servo_command": "HOLD",
+                "error_code": "ERR_NONE",
+                "error_message": "",
+            },
+            input_mode="camera",
+        ),
+    )
+
+    rewritten = csv_path.read_text(encoding="utf-8").splitlines()
+    assert "bear_approaching" not in rewritten[0]
+    assert "bear_detected" in rewritten[0]
+    assert "WAIT_CONTACT" in rewritten[1]
+    legacy_files = list(tmp_path.glob("feeding_decision_log.legacy_*.csv"))
+    assert len(legacy_files) == 1
+    assert "bear_approaching" in legacy_files[0].read_text(encoding="utf-8")

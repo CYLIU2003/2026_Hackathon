@@ -7,7 +7,7 @@ logging, dashboard, and training workflow can evolve independently.
 
 ```text
 Camera AI support signal
-  -> ai_bear_approaching
+  -> ai_bear_detected
 
 Contact pad controller
   -> paw_contact / raw_contact_value
@@ -36,7 +36,7 @@ release.
 | USB camera smoke test | Implemented | `raspberry_pi/camera_ai/camera_test.py` |
 | Camera AI detection loop | Implemented | `raspberry_pi/camera_ai/run_camera_ai.py` |
 | Bear detector wrapper | Implemented | `raspberry_pi/camera_ai/bear_detector.py` |
-| Bear approach logic | Implemented | `raspberry_pi/camera_ai/approach_logic.py` |
+| Bear detection logic | Implemented | `raspberry_pi/camera_ai/approach_logic.py` |
 | Camera AI JSON/CSV publisher | Implemented | `raspberry_pi/camera_ai/ai_state_publisher.py` |
 | SSH-forwardable camera viewer | Implemented | `raspberry_pi/camera_ai/web_camera_ai.py` |
 | Public data preparation | Implemented | `raspberry_pi/camera_ai/prepare_bear_training_data.py` |

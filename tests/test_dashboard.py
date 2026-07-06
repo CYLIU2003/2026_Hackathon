@@ -54,8 +54,8 @@ def test_dashboard_serves_camera_ai_state_and_latest_frame(tmp_path):
     )
     write_csv(
         camera_log,
-        "timestamp,event,ai_camera_ok,ai_model_ok,ai_bear_detected,ai_bear_approaching",
-        "2026-06-17T10:01:00+09:00,AI_BEAR_DETECTED,true,true,true,false",
+        "timestamp,event,ai_camera_ok,ai_model_ok,ai_bear_detected,ai_bear_confidence",
+        "2026-06-17T10:01:00+09:00,AI_BEAR_DETECTED,true,true,true,0.80",
     )
     frame_dir.mkdir(parents=True)
     frame_path.write_bytes(b"\xff\xd8\xff\xd9")
@@ -80,10 +80,93 @@ def test_dashboard_serves_camera_ai_state_and_latest_frame(tmp_path):
         b"Feeding Safety Decision"
     )
     assert b"AI_BEAR_DETECTED" in page_response.data
+    assert b"ai_bear_approaching" not in page_response.data
+    assert "ai_camera_status / AI Camera Status / AIカメラ状態".encode("utf-8") in page_response.data
+    assert "Detected / 検出済み".encode("utf-8") in page_response.data
     assert b"RELEASE_OFF" in page_response.data
     assert b"frame_brightness" in page_response.data
     assert frame_response.status_code == 200
     assert frame_response.mimetype == "image/jpeg"
+
+
+def test_dashboard_state_api_is_lightweight_json(tmp_path):
+    log_dir = tmp_path / "logs"
+    frame_dir = tmp_path / "debug_frames"
+    feeding_log = log_dir / "feeding_decision_log.csv"
+    camera_log = log_dir / "camera_ai_log.csv"
+    write_csv(
+        feeding_log,
+        "timestamp,state,presentation_state,camera_status,bear_detected,"
+        "confidence,contact_confirmed,safety_decision,servo_command,"
+        "log_status,input_mode",
+        "2026-06-24T18:50:12+09:00,BEAR_DETECTED,BEAR_DETECTED,Running,true,"
+        "0.86,false,WAIT_CONTACT,HOLD,SAVED,camera",
+    )
+    write_csv(
+        camera_log,
+        "timestamp,event,ai_camera_ok,ai_model_ok,ai_bear_detected,ai_bear_confidence",
+        "2026-06-24T18:50:12+09:00,AI_BEAR_DETECTED,true,true,true,0.86",
+    )
+    app = create_app(
+        log_dir,
+        str(feeding_log),
+        1,
+        camera_log_file=str(camera_log),
+        debug_frame_dir=frame_dir,
+        camera_frame_file="latest_camera_ai.jpg",
+    )
+
+    response = app.test_client().get("/api/dashboard-state")
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/json"
+    assert response.json["camera_row"]["ai_bear_detected"] == "true"
+    assert response.json["camera_row"]["ai_camera_status"] == "Detected / 検出済み"
+    assert response.json["row"]["camera_status"] == "Detected / 検出済み"
+    assert response.json["row"]["release_action_message"] == (
+        "Detected → Safety check / 検出済み➡安全確認中"
+    )
+    assert "ai_bear_approaching" not in response.json["camera_row"]
+    assert response.json["row"]["safety_decision"] == "WAIT_CONTACT"
+
+
+def test_dashboard_uses_recent_ok_camera_row_over_transient_error(tmp_path):
+    log_dir = tmp_path / "logs"
+    frame_dir = tmp_path / "debug_frames"
+    feeding_log = log_dir / "feeding_decision_log.csv"
+    camera_log = log_dir / "camera_ai_log.csv"
+    write_csv(
+        feeding_log,
+        "timestamp,state,presentation_state,camera_status,bear_detected,"
+        "confidence,contact_confirmed,safety_decision,servo_command,"
+        "log_status,input_mode",
+        "2026-06-24T18:50:12+09:00,IDLE,IDLE,Running,false,"
+        ",false,IDLE,HOLD,SAVED,camera",
+    )
+    camera_log.parent.mkdir(parents=True, exist_ok=True)
+    camera_log.write_text(
+        "timestamp,event,ai_camera_ok,ai_model_ok,ai_bear_detected,ai_bear_confidence\n"
+        "2026-06-24T18:50:10+09:00,AI_NO_BEAR,true,true,false,\n"
+        "2026-06-24T18:50:12+09:00,AI_CAMERA_OPEN_ERROR,false,true,false,\n",
+        encoding="utf-8",
+    )
+    app = create_app(
+        log_dir,
+        str(feeding_log),
+        1,
+        camera_log_file=str(camera_log),
+        debug_frame_dir=frame_dir,
+        camera_frame_file="latest_camera_ai.jpg",
+    )
+
+    response = app.test_client().get("/api/dashboard-state")
+
+    assert response.status_code == 200
+    assert response.json["camera_row"]["event"] == "AI_NO_BEAR"
+    assert response.json["camera_row"]["ai_camera_ok"] == "true"
+    assert response.json["camera_row"]["ai_camera_status"] == (
+        "No bear detected / 熊未検出"
+    )
 
 
 def test_dashboard_serves_camera_ai_mjpeg_stream(tmp_path):
@@ -127,7 +210,7 @@ def test_dashboard_highlights_integrated_feeding_decision(tmp_path):
         "2026-06-24T18:50:12+09:00,RELEASING,FEEDING,Running,true,"
         "0.86,true,SAFE_TO_FEED,RELEASE,SAVED,camera",
     )
-    write_csv(camera_log, "timestamp,event", "2026-06-24T18:50:12+09:00,AI_BEAR_APPROACHING")
+    write_csv(camera_log, "timestamp,event", "2026-06-24T18:50:12+09:00,AI_BEAR_DETECTED")
 
     app = create_app(
         log_dir,
@@ -144,6 +227,8 @@ def test_dashboard_highlights_integrated_feeding_decision(tmp_path):
     assert b"SAFE_TO_FEED" in response.data
     assert b"RELEASE" in response.data
     assert b"Confirmed" in response.data
+    assert "Detected → Dispensing / 検出済み➡排出します".encode("utf-8") in response.data
+    assert "Rate limit: maximum once per 10 seconds / 動作上限: 10秒に1回".encode("utf-8") in response.data
 
 
 def test_dashboard_shows_demo_mode_panel_and_status_api(tmp_path):

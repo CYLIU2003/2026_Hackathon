@@ -24,7 +24,7 @@ def now_jst_iso() -> str:
     return datetime.now(JST).isoformat(timespec="seconds")
 
 
-def make_record(i: int, detected: bool, approaching: bool) -> dict:
+def make_record(i: int, detected: bool) -> dict:
     return {
         "timestamp": now_jst_iso(),
         "source": "fake_camera_ai",
@@ -34,8 +34,7 @@ def make_record(i: int, detected: bool, approaching: bool) -> dict:
         "ai_bear_detected": detected,
         "ai_bear_confidence": 0.90 if detected else 0.0,
         "ai_bear_box_area_ratio": 0.20 if detected else 0.0,
-        "ai_bear_approaching": approaching,
-        "event": "AI_BEAR_APPROACHING" if approaching else "AI_IDLE",
+        "event": "AI_BEAR_DETECTED" if detected else "AI_NO_BEAR",
         "inference_time_ms": 1.0,
         "fake_step": i,
     }
@@ -57,8 +56,7 @@ def main() -> int:
     while True:
         i += 1
         detected = (i % args.bear_every) != 1
-        approaching = detected
-        print(json.dumps(make_record(i, detected, approaching), ensure_ascii=False), flush=True)
+        print(json.dumps(make_record(i, detected), ensure_ascii=False), flush=True)
         time.sleep(args.interval_sec)
 
         if not args.loop and i >= args.max_iterations:

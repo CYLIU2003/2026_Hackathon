@@ -4,7 +4,7 @@
 
 本仓库用于 A1 **Bear Honey Buffet** 黑客松项目中的 **Front Paw Contact Pad System** 原型开发。
 
-当前原型不仅包含模拟输入和接触垫控制，还包含 Raspberry Pi 侧的相机AI识别模块。系统会检测熊或目标物是否接近，确认前掌接触或未来的电阻/接触垫输入，检查蜂蜜余量和安全状态，然后安全地判断是否发送蜂蜜释放信号。
+当前原型不仅包含模拟输入和接触垫控制，还包含 Raspberry Pi 侧的相机AI识别模块。系统会检测熊或目标物是否存在，确认前掌接触或未来的电阻/接触垫输入，检查蜂蜜余量和安全状态，然后安全地判断是否发送蜂蜜释放信号。
 
 相机AI是额外的感知层，不是唯一的安全控制器。不能只因为YOLO检测到熊就释放蜂蜜。
 
@@ -20,7 +20,7 @@ A1系统整体分为四个层。
 [Bear]
   ↓
 [Camera AI perception layer]
-  ↓ ai_bear_approaching
+  ↓ ai_bear_detected
 [Contact / resistance confirmation layer]
   ↓ paw_contact / raw_contact_value
 [Safety decision layer]
@@ -39,7 +39,7 @@ A1系统整体分为四个层。
 系统会判断以下内容。
 
 ```text
-1. 熊或目标物是否接近              ai_bear_approaching / bear_detected
+1. 熊或目标物是否被检测到          ai_bear_detected / bear_detected
 2. 前掌是否接触接触垫              paw_contact / raw_contact_value
 3. 蜂蜜剩余量是否足够              honey_amount_percent
 4. 系统是否处于安全状态            system_safe
@@ -79,7 +79,7 @@ Arduino Uno Q 继续作为现场侧接触确认和安全控制板。
 - serial 或 network 通信
 ```
 
-Arduino Uno Q / 电阻测量 / 接触垫逻辑必须继续保留在文档和实现中。camera AI 可以增加 `ai_bear_approaching`，但不能替代 `paw_contact`、`raw_contact_value`、接触阈值、紧急停止和 RELEASE_OFF 故障安全行为。
+Arduino Uno Q / 电阻测量 / 接触垫逻辑必须继续保留在文档和实现中。camera AI 可以增加 `ai_bear_detected`，但不能替代 `paw_contact`、`raw_contact_value`、接触阈值、紧急停止和 RELEASE_OFF 故障安全行为。
 
 Arduino Uno Q 同时具有可运行Linux的MPU侧和实时控制用MCU侧，因此适合承担现场控制任务。
 
@@ -99,8 +99,8 @@ Raspberry Pi 4B 4GB 用于AI相机识别、日志记录和上位状态处理。
 ```text
 - 从 BUFFALO BSW500M USB摄像头获取图像
 - 使用 OpenCV / V4L2 进行相机采集
-- 使用轻量YOLO进行熊接近检测
-- 输出 ai_bear_approaching 状态
+- 使用轻量YOLO进行熊检测
+- 输出 ai_bear_detected 状态
 - 接收 Arduino Uno Q 的状态数据
 - 保存CSV日志
 - 显示仪表盘
@@ -147,11 +147,10 @@ BUFFALO BSW500M USB Camera
 Raspberry Pi 4B 4GB
   - OpenCV / V4L2 camera capture
   - YOLO bear detection
-  - bear approach judgement
   - JSON Lines / CSV logging
   ↓
 Existing decision logic
-  - ai_bear_approaching
+  - ai_bear_detected
   - paw_contact / resistance measurement
   - honey_amount_percent
   - system_safe
@@ -174,7 +173,7 @@ Honey release mechanism
 
 ```text
 simulated_bear_detected
-ai_bear_approaching
+ai_bear_detected
 simulated_paw_contact
 raw_contact_value
 simulated_honey_amount_percent
@@ -186,7 +185,7 @@ emergency_stop
 
 ```text
 release_allowed = (
-    ai_bear_approaching
+    ai_bear_detected
     and paw_contact
     and honey_amount_percent >= honey_min_threshold_percent
     and system_safe
@@ -268,7 +267,7 @@ IDLE
 
 ```python
 release_allowed = (
-    ai_bear_approaching
+    ai_bear_detected
     and paw_contact
     and honey_amount_percent >= honey_min_threshold_percent
     and system_safe
@@ -302,7 +301,7 @@ timestamp,bear_detected,paw_contact,honey_amount_percent,system_safe,emergency_s
 Camera AI 也会从 Raspberry Pi 输出 JSON Lines。
 
 ```json
-{"source":"camera_ai","ai_camera_ok":true,"ai_model_ok":true,"ai_bear_detected":true,"ai_bear_confidence":0.82,"ai_bear_box_area_ratio":0.18,"ai_bear_approaching":true,"event":"AI_BEAR_APPROACHING"}
+{"source":"camera_ai","ai_camera_ok":true,"ai_model_ok":true,"ai_bear_detected":true,"ai_bear_confidence":0.82,"ai_bear_box_area_ratio":0.18,"event":"AI_BEAR_DETECTED"}
 ```
 
 这些 camera AI 字段只是安全判断层的输入，不会直接命令 `RELEASE_ON`。
@@ -385,7 +384,7 @@ Arduino/contact-pad 侧移到 Raspberry Pi。
 - fallback模型路径: models/yolo_bear.pt
 - Raspberry Pi 4B 推荐分辨率: 320x240
 - 推荐FourCC: 先MJPG，失败时fallback到YUYV
-- 失败行为: ai_bear_approaching=false
+- 失败行为: ai_bear_detected=false
 ```
 
 如果所有配置的模型路径都缺失，系统输出 `AI_MODEL_LOAD_ERROR`，设置 `ai_model_ok=false`，并保持故障安全状态。
@@ -460,7 +459,7 @@ fuser -v /dev/video0
 | `arduino_uno_q/contact_pad_controller/` | Arduino Uno Q 主控制。负责模拟输入、接触垫状态机、蜂蜜量阈值判断、RELEASE_ON/OFF输出、LED/GPIO、JSON Lines输出。 |
 | `raspberry_pi/logger/` | Raspberry Pi 串口日志程序。接收Arduino和AI的JSON Lines并保存为CSV日志。 |
 | `raspberry_pi/dashboard/` | 演示和监控用仪表盘。统一显示接触状态、AI状态和释放状态。 |
-| `raspberry_pi/camera_ai/` | 可选的相机AI感知层。负责测试 `/dev/video0`、加载YOLO、估计熊是否接近、输出AI状态。但不能直接命令蜂蜜释放。 |
+| `raspberry_pi/camera_ai/` | 可选的相机AI感知层。负责测试 `/dev/video0`、加载YOLO、检测熊、输出AI状态。但不能直接命令蜂蜜释放。 |
 | `docs/` | 设计资料，包括框图、状态机、接口规格和camera AI设计说明。 |
 | `data/logs/` | 运行时CSV/JSONL日志目录。除小型示例外，生成日志通常不提交到Git。 |
 | `examples/` | 演示和说明用的小型示例输入/输出文件。 |
@@ -498,7 +497,7 @@ fuser -v /dev/video0
 [ ] 放置或导出 models/yolo_bear_ncnn_model
 [ ] 确认 AI_MODEL_LOAD_ERROR 消失
 [ ] 对相机图像运行YOLO推理
-[ ] 以故障安全方式输出 ai_bear_approaching
+[ ] 以故障安全方式输出 ai_bear_detected
 ```
 
 ### Phase 4: AI状态日志和仪表盘集成
@@ -506,7 +505,7 @@ fuser -v /dev/video0
 ```text
 [ ] 记录 camera AI JSON Lines / CSV
 [ ] 显示 ai_camera_ok 和 ai_model_ok
-[ ] 显示 ai_bear_detected 和 ai_bear_approaching
+[ ] 显示 ai_bear_detected
 [ ] 同时显示接触状态和释放状态
 ```
 
@@ -531,7 +530,7 @@ fuser -v /dev/video0
 ### Phase 7: 带故障安全的全系统演示
 
 ```text
-[ ] Camera AI 检测接近
+[ ] Camera AI 检测到熊
 [ ] 接触/电阻层确认 paw_contact
 [ ] 蜂蜜量和安全条件通过
 [ ] 紧急停止强制 RELEASE_OFF
@@ -544,7 +543,7 @@ fuser -v /dev/video0
 
 ```text
 I will develop the front paw contact pad system as a separate electronic/control module.
-Raspberry Pi 4B with a BUFFALO BSW500M camera will be used for YOLO-based bear approach detection, logging, and dashboard support.
+Raspberry Pi 4B with a BUFFALO BSW500M camera will be used for YOLO-based bear detection, logging, and dashboard support.
 Arduino Uno Q and the contact/resistance layer remain responsible for contact confirmation and fail-safe release logic.
 PCA9685 and a servo motor will be used on the honey release mechanism side.
 Camera AI is an additional perception layer, not the only safety controller.
@@ -572,7 +571,7 @@ Camera AI is an additional perception layer, not the only safety controller.
 [ ] Uno Q 可以生成模拟输入
 [ ] Uno Q 可以判断 RELEASE_ON/OFF
 [ ] Raspberry Pi 可以通过 `device=auto` 从 BSW500M 采集图像
-[ ] Camera AI 可以输出故障安全的 ai_bear_approaching
+[ ] Camera AI 可以输出故障安全的 ai_bear_detected
 [ ] 通过LED或serial可以看到 RELEASE_ON/OFF
 [ ] Raspberry Pi 可以接收状态数据
 [ ] Raspberry Pi 可以保存CSV日志
@@ -901,4 +900,4 @@ CSV列: `timestamp`, `command`, `serial_command`, `demo_enabled`,
 
 ## 一句话总结
 
-本项目使用 Raspberry Pi 4B 和 BUFFALO BSW500M USB 摄像头进行基于 YOLO 的熊接近检测，同时保留 Arduino/接触垫的安全判断逻辑，只有在 AI 检测、接触确认、蜂蜜余量和安全条件全部满足时才允许释放蜂蜜。
+本项目使用 Raspberry Pi 4B 和 BUFFALO BSW500M USB 摄像头进行基于 YOLO 的熊检测，同时保留 Arduino/接触垫的安全判断逻辑，只有在 AI 检测、接触确认、蜂蜜余量和安全条件全部满足时才允许释放蜂蜜。

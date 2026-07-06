@@ -16,7 +16,6 @@ CSV_COLUMNS = [
     "ai_bear_detected",
     "ai_bear_confidence",
     "ai_bear_box_area_ratio",
-    "ai_bear_approaching",
     "event",
     "inference_time_ms",
 ]
@@ -34,7 +33,6 @@ class AiState:
     ai_bear_detected: bool
     ai_bear_confidence: Optional[float]
     ai_bear_box_area_ratio: Optional[float]
-    ai_bear_approaching: bool
     event: str
     inference_time_ms: Optional[float]
     timestamp: Optional[str] = None
@@ -50,7 +48,6 @@ class AiState:
             "ai_bear_detected": self.ai_bear_detected,
             "ai_bear_confidence": self.ai_bear_confidence,
             "ai_bear_box_area_ratio": self.ai_bear_box_area_ratio,
-            "ai_bear_approaching": self.ai_bear_approaching,
             "event": self.event,
             "inference_time_ms": self.inference_time_ms,
         }
@@ -79,6 +76,7 @@ class AiStatePublisher:
     def _append_csv(self, record: dict) -> None:
         assert self.csv_path is not None
         self.csv_path.parent.mkdir(parents=True, exist_ok=True)
+        self._rotate_if_schema_changed()
         write_header = not self.csv_path.exists()
         with self.csv_path.open("a", newline="", encoding="utf-8") as csv_file:
             writer = csv.DictWriter(csv_file, fieldnames=CSV_COLUMNS)
@@ -86,3 +84,19 @@ class AiStatePublisher:
                 writer.writeheader()
             writer.writerow({column: record.get(column, "") for column in CSV_COLUMNS})
 
+    def _rotate_if_schema_changed(self) -> None:
+        assert self.csv_path is not None
+        if not self.csv_path.exists() or self.csv_path.stat().st_size == 0:
+            return
+        try:
+            with self.csv_path.open("r", newline="", encoding="utf-8") as csv_file:
+                header = next(csv.reader(csv_file), [])
+        except (OSError, csv.Error):
+            return
+        if header == CSV_COLUMNS:
+            return
+        timestamp = datetime.now(timezone.utc).astimezone().strftime("%Y%m%dT%H%M%S%z")
+        legacy_path = self.csv_path.with_name(
+            f"{self.csv_path.stem}.legacy_{timestamp}{self.csv_path.suffix}"
+        )
+        self.csv_path.rename(legacy_path)

@@ -34,13 +34,12 @@ class ApproachDecision:
     ai_bear_detected: bool
     ai_bear_confidence: Optional[float]
     ai_bear_box_area_ratio: Optional[float]
-    ai_bear_approaching: bool
     consecutive_count: int
     event: str
 
 
 class ApproachLogic:
-    """Convert YOLO object detections into a fail-safe approach decision."""
+    """Convert YOLO object detections into a fail-safe detection decision."""
 
     def __init__(self, config: ApproachDetectionConfig):
         self.config = config
@@ -71,9 +70,6 @@ class ApproachLogic:
                 self._consecutive_count += 1
             self._last_valid_detection_time = now_monotonic
 
-        ai_bear_approaching = (
-            self._consecutive_count >= self.config.consecutive_required
-        )
         ai_bear_detected = best_confident_detection is not None
 
         confidence = (
@@ -87,9 +83,7 @@ class ApproachLogic:
             else None
         )
 
-        if ai_bear_approaching:
-            event = "AI_BEAR_APPROACHING"
-        elif ai_bear_detected:
+        if ai_bear_detected:
             event = "AI_BEAR_DETECTED"
         else:
             event = "AI_NO_BEAR"
@@ -98,7 +92,6 @@ class ApproachLogic:
             ai_bear_detected=ai_bear_detected,
             ai_bear_confidence=confidence,
             ai_bear_box_area_ratio=area_ratio,
-            ai_bear_approaching=ai_bear_approaching,
             consecutive_count=self._consecutive_count,
             event=event,
         )
@@ -138,4 +131,3 @@ class ApproachLogic:
         ):
             return None
         return detection
-

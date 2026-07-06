@@ -4,7 +4,7 @@
 
 이 저장소는 A1 **Bear Honey Buffet** 해커톤 프로젝트의 **Front Paw Contact Pad System** 프로토타입을 다룬다.
 
-현재 프로토타입은 시뮬레이션 입력과 접촉 패드 제어에 더해 Raspberry Pi 카메라 AI 인식 모듈을 포함한다. 곰 또는 대상 물체의 접근을 감지하고, 앞발 접촉 또는 향후 전기저항/접촉 패드 입력을 확인하며, 꿀 잔량과 안전 상태를 확인한 뒤 꿀 방출 신호를 안전하게 판단한다.
+현재 프로토타입은 시뮬레이션 입력과 접촉 패드 제어에 더해 Raspberry Pi 카메라 AI 인식 모듈을 포함한다. 곰 또는 대상 물체의 존재를 감지하고, 앞발 접촉 또는 향후 전기저항/접촉 패드 입력을 확인하며, 꿀 잔량과 안전 상태를 확인한 뒤 꿀 방출 신호를 안전하게 판단한다.
 
 카메라 AI는 추가 인식 레이어이며, 단독 안전 제어기가 아니다. YOLO 감지만으로 꿀을 방출해서는 안 된다.
 
@@ -20,7 +20,7 @@ A1 시스템 전체는 네 개의 레이어로 나뉜다.
 [Bear]
   ↓
 [Camera AI perception layer]
-  ↓ ai_bear_approaching
+  ↓ ai_bear_detected
 [Contact / resistance confirmation layer]
   ↓ paw_contact / raw_contact_value
 [Safety decision layer]
@@ -39,7 +39,7 @@ A1 시스템 전체는 네 개의 레이어로 나뉜다.
 이 시스템은 다음을 확인한다.
 
 ```text
-1. 곰 또는 대상 물체가 접근하는가       ai_bear_approaching / bear_detected
+1. 곰 또는 대상 물체를 감지했는가       ai_bear_detected / bear_detected
 2. 앞발이 접촉 패드에 닿았는가           paw_contact / raw_contact_value
 3. 꿀의 양이 충분한가                    honey_amount_percent
 4. 시스템이 안전 상태인가                system_safe
@@ -79,7 +79,7 @@ Arduino Uno Q 는 현장 측 접촉 확인 및 안전 제어 보드로 유지한
 - serial 또는 network 통신
 ```
 
-Arduino Uno Q / 전기저항 측정 / 접촉 패드 로직은 문서와 구현에서 계속 유지해야 한다. camera AI 는 `ai_bear_approaching` 을 추가할 수 있지만, `paw_contact`, `raw_contact_value`, 접촉 임계값, 비상 정지, RELEASE_OFF fail-safe 동작을 대체하지 않는다.
+Arduino Uno Q / 전기저항 측정 / 접촉 패드 로직은 문서와 구현에서 계속 유지해야 한다. camera AI 는 `ai_bear_detected` 를 추가할 수 있지만, `paw_contact`, `raw_contact_value`, 접촉 임계값, 비상 정지, RELEASE_OFF fail-safe 동작을 대체하지 않는다.
 
 Arduino Uno Q 는 Linux를 실행할 수 있는 MPU 측과 실시간 제어용 MCU 측을 함께 갖는 구조이므로, 현장 제어에 적합하다.
 
@@ -99,8 +99,8 @@ Raspberry Pi 4B 4GB 는 AI 카메라 인식, 로그 기록, 상위 상태 처리
 ```text
 - BUFFALO BSW500M USB 카메라에서 이미지 캡처
 - OpenCV / V4L2 카메라 캡처 실행
-- 경량 YOLO로 곰 접근 감지
-- ai_bear_approaching 상태 출력
+- 경량 YOLO로 곰 감지
+- ai_bear_detected 상태 출력
 - Arduino Uno Q 에서 상태 데이터 수신
 - CSV 로그 저장
 - 대시보드 표시
@@ -144,11 +144,11 @@ BUFFALO BSW500M USB Camera
 Raspberry Pi 4B 4GB
   - OpenCV / V4L2 camera capture
   - YOLO bear detection
-  - bear approach judgement
+  - bear detection judgement
   - JSON Lines / CSV logging
   ↓
 Existing decision logic
-  - ai_bear_approaching
+  - ai_bear_detected
   - paw_contact / resistance measurement
   - honey_amount_percent
   - system_safe
@@ -171,7 +171,7 @@ Honey release mechanism
 
 ```text
 simulated_bear_detected
-ai_bear_approaching
+ai_bear_detected
 simulated_paw_contact
 raw_contact_value
 simulated_honey_amount_percent
@@ -183,7 +183,7 @@ emergency_stop
 
 ```text
 release_allowed = (
-    ai_bear_approaching
+    ai_bear_detected
     and paw_contact
     and honey_amount_percent >= honey_min_threshold_percent
     and system_safe
@@ -265,7 +265,7 @@ IDLE
 
 ```python
 release_allowed = (
-    ai_bear_approaching
+    ai_bear_detected
     and paw_contact
     and honey_amount_percent >= honey_min_threshold_percent
     and system_safe
@@ -299,7 +299,7 @@ timestamp,bear_detected,paw_contact,honey_amount_percent,system_safe,emergency_s
 Camera AI 도 Raspberry Pi 에서 JSON Lines 를 출력한다.
 
 ```json
-{"source":"camera_ai","ai_camera_ok":true,"ai_model_ok":true,"ai_bear_detected":true,"ai_bear_confidence":0.82,"ai_bear_box_area_ratio":0.18,"ai_bear_approaching":true,"event":"AI_BEAR_APPROACHING"}
+{"source":"camera_ai","ai_camera_ok":true,"ai_model_ok":true,"ai_bear_detected":true,"ai_bear_confidence":0.82,"ai_bear_box_area_ratio":0.18,"event":"AI_BEAR_DETECTED"}
 ```
 
 이 camera AI 필드는 안전 판단 레이어의 입력일 뿐이며, `RELEASE_ON` 을 직접 명령하지 않는다.
@@ -381,7 +381,7 @@ Arduino/contact-pad 쪽에서 Raspberry Pi 로 옮기는 것이 아니다.
 - fallback 모델 경로: models/yolo_bear.pt
 - Raspberry Pi 4B 권장 해상도: 320x240
 - 권장 FourCC: 먼저 MJPG, 실패 시 YUYV fallback
-- 실패 동작: ai_bear_approaching=false
+- 실패 동작: ai_bear_detected=false
 ```
 
 설정된 모든 모델 경로가 없으면 시스템은 `AI_MODEL_LOAD_ERROR` 를 출력하고, `ai_model_ok=false` 로 설정하며 fail-safe 상태를 유지한다.
@@ -453,7 +453,7 @@ fuser -v /dev/video0
 | `arduino_uno_q/contact_pad_controller/` | Arduino Uno Q 메인 제어. 시뮬레이션 입력, 접촉 패드 상태 머신, 꿀 양 임계값 판단, RELEASE_ON/OFF 출력, LED/GPIO, JSON Lines 출력을 담당한다. |
 | `raspberry_pi/logger/` | Raspberry Pi 시리얼 로거. Arduino와 AI의 JSON Lines를 수신하여 CSV 로그로 저장한다. |
 | `raspberry_pi/dashboard/` | 데모 및 모니터링용 대시보드. 접촉 상태, AI 상태, 방출 상태를 함께 표시한다. |
-| `raspberry_pi/camera_ai/` | 선택적인 카메라 AI 인식 레이어. `/dev/video0` 카메라 테스트, YOLO 로드, 곰 접근 추정, AI 상태 출력을 담당한다. 단, 꿀 방출을 직접 명령해서는 안 된다. |
+| `raspberry_pi/camera_ai/` | 선택적인 카메라 AI 인식 레이어. `/dev/video0` 카메라 테스트, YOLO 로드, 곰 감지, AI 상태 출력을 담당한다. 단, 꿀 방출을 직접 명령해서는 안 된다. |
 | `docs/` | 블록 다이어그램, 상태 머신, 인터페이스 사양, camera AI 설계 메모 등 설계 문서. |
 | `data/logs/` | 실행 시 생성되는 CSV/JSONL 로그 폴더. 작은 샘플을 제외한 생성 로그는 보통 Git에 커밋하지 않는다. |
 | `examples/` | 데모와 설명에 쓰는 작은 샘플 입출력 파일. |
@@ -491,7 +491,7 @@ fuser -v /dev/video0
 [ ] models/yolo_bear_ncnn_model 배치 또는 export
 [ ] AI_MODEL_LOAD_ERROR 가 사라지는지 확인
 [ ] 카메라 프레임에 YOLO 추론 실행
-[ ] ai_bear_approaching 을 fail-safe 로 출력
+[ ] ai_bear_detected 를 fail-safe 로 출력
 ```
 
 ### Phase 4: AI 상태 로깅과 대시보드 통합
@@ -499,7 +499,7 @@ fuser -v /dev/video0
 ```text
 [ ] camera AI JSON Lines / CSV 기록
 [ ] ai_camera_ok 와 ai_model_ok 표시
-[ ] ai_bear_detected 와 ai_bear_approaching 표시
+[ ] ai_camera_ok, ai_model_ok, ai_bear_detected 표시
 [ ] 접촉 상태와 방출 상태를 함께 표시
 ```
 
@@ -524,7 +524,7 @@ fuser -v /dev/video0
 ### Phase 7: Fail-Safe 포함 전체 시스템 데모
 
 ```text
-[ ] Camera AI 가 접근을 감지
+[ ] Camera AI 가 곰을 감지
 [ ] 접촉/저항 레이어가 paw_contact 확인
 [ ] 꿀 잔량과 안전 조건 통과
 [ ] 비상 정지가 RELEASE_OFF 강제
@@ -537,7 +537,7 @@ fuser -v /dev/video0
 
 ```text
 I will develop the front paw contact pad system as a separate electronic/control module.
-Raspberry Pi 4B with a BUFFALO BSW500M camera will be used for YOLO-based bear approach detection, logging, and dashboard support.
+Raspberry Pi 4B with a BUFFALO BSW500M camera will be used for YOLO-based bear detection, logging, and dashboard support.
 Arduino Uno Q and the contact/resistance layer remain responsible for contact confirmation and fail-safe release logic.
 PCA9685 and a servo motor will be used on the honey release mechanism side.
 Camera AI is an additional perception layer, not the only safety controller.
@@ -565,7 +565,7 @@ Camera AI is an additional perception layer, not the only safety controller.
 [ ] Uno Q 가 시뮬레이션 입력을 생성할 수 있다
 [ ] Uno Q 가 RELEASE_ON/OFF 를 판단할 수 있다
 [ ] Raspberry Pi 가 /dev/video0 에서 이미지를 캡처할 수 있다
-[ ] Camera AI 가 fail-safe ai_bear_approaching 을 출력할 수 있다
+[ ] Camera AI 가 fail-safe ai_bear_detected 를 출력할 수 있다
 [ ] LED 또는 serial 로 RELEASE_ON/OFF 를 확인할 수 있다
 [ ] Raspberry Pi 가 상태 데이터를 수신할 수 있다
 [ ] Raspberry Pi 가 CSV 로그를 저장할 수 있다
@@ -858,4 +858,4 @@ CSV 컬럼: `timestamp`, `command`, `serial_command`, `demo_enabled`,
 
 ## 한 문장 요약
 
-이 프로젝트는 Raspberry Pi 4B와 BUFFALO BSW500M USB 카메라를 사용하여 YOLO 기반 곰 접근 감지를 수행하며, 기존 Arduino/접촉 패드 안전 판단 로직을 유지하여 AI 감지, 접촉 확인, 꿀 잔량, 안전 조건이 모두 만족될 때만 꿀 방출을 허용한다.
+이 프로젝트는 Raspberry Pi 4B와 BUFFALO BSW500M USB 카메라를 사용하여 YOLO 기반 곰 감지를 수행하며, 기존 Arduino/접촉 패드 안전 판단 로직을 유지하여 AI 감지, 접촉 확인, 꿀 잔량, 안전 조건이 모두 만족될 때만 꿀 방출을 허용한다.

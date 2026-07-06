@@ -11,6 +11,7 @@ from raspberry_pi.camera_ai.camera_capture import (
     resolve_camera_source,
     select_camera_device,
 )
+from raspberry_pi.camera_ai.run_camera_ai import camera_failure_is_transient
 
 
 class FakeFrame:
@@ -91,6 +92,24 @@ class FakeCv2:
 def test_default_camera_source_is_video0_path():
     assert resolve_camera_source({}) == DEFAULT_CAMERA_DEVICE
     assert resolve_camera_source({}) != "/dev/video1"
+
+
+def test_camera_failure_grace_only_suppresses_recent_transients():
+    assert camera_failure_is_transient(
+        last_camera_ok_at=10.0,
+        now_monotonic=11.5,
+        grace_sec=2.0,
+    )
+    assert not camera_failure_is_transient(
+        last_camera_ok_at=10.0,
+        now_monotonic=13.0,
+        grace_sec=2.0,
+    )
+    assert not camera_failure_is_transient(
+        last_camera_ok_at=None,
+        now_monotonic=11.0,
+        grace_sec=2.0,
+    )
 
 
 def test_camera_device_config_uses_video0_path():

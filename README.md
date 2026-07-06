@@ -4,7 +4,7 @@
 
 This repository contains the prototype for the **Front Paw Contact Pad System** in the A1 **Bear Honey Buffet** hackathon project.
 
-The current prototype now includes both simulated/contact-pad control and a Raspberry Pi camera AI module. The goal is to detect whether a bear or target object is approaching, confirm front paw contact or future electrical-resistance/contact-pad input, check honey and safety conditions, and then safely decide whether to send a honey release signal.
+The current prototype now includes both simulated/contact-pad control and a Raspberry Pi camera AI module. The goal is to detect whether a bear or target object is present, confirm front paw contact or future electrical-resistance/contact-pad input, check honey and safety conditions, and then safely decide whether to send a honey release signal.
 
 Camera AI is an additional perception layer, not the only safety controller. YOLO detection must not directly trigger honey release.
 
@@ -33,7 +33,7 @@ The whole A1 system is divided into four layers.
 [Bear]
   ↓
 [Camera AI perception layer]
-  ↓ ai_bear_approaching
+  ↓ ai_bear_detected
 [Contact / resistance confirmation layer]
   ↓ paw_contact / raw_contact_value
 [Safety decision layer]
@@ -52,7 +52,7 @@ This repository focuses on perception, contact confirmation, safety decision log
 The system checks:
 
 ```text
-1. Is a bear or target object approaching?           ai_bear_approaching / bear_detected
+1. Is a bear or target object detected?              ai_bear_detected / bear_detected
 2. Is the front paw touching the pad?                paw_contact / raw_contact_value
 3. Is there enough honey?                            honey_amount_percent
 4. Is the system safe?                               system_safe
@@ -92,7 +92,7 @@ Expected responsibilities:
 - USB serial communication
 ```
 
-Arduino Uno / electrical-resistance measurement / contact-pad logic must remain documented and implemented. The camera AI layer can add `ai_bear_approaching`, but it does not replace `paw_contact`, `raw_contact_value`, contact thresholds, emergency stop, or RELEASE_OFF fail-safe behavior.
+Arduino Uno / electrical-resistance measurement / contact-pad logic must remain documented and implemented. The camera AI layer can add `ai_bear_detected`, but it does not replace `paw_contact`, `raw_contact_value`, contact thresholds, emergency stop, or RELEASE_OFF fail-safe behavior.
 
 For the PCA9685 actuator, connect `SDA` to Arduino Uno `A4`, `SCL` to `A5`,
 `VCC` to logic power, and all grounds together. Power the servo from a suitable
@@ -107,8 +107,8 @@ Expected responsibilities:
 ```text
 - capture images from BUFFALO BSW500M USB camera
 - run OpenCV / V4L2 camera capture
-- run lightweight YOLO bear approach detection
-- publish ai_bear_approaching state
+- run lightweight YOLO bear detection
+- publish ai_bear_detected state
 - receive data from Arduino Uno
 - save CSV logs
 - show dashboard
@@ -155,11 +155,11 @@ BUFFALO BSW500M USB Camera
 Raspberry Pi 4B 4GB
   - OpenCV / V4L2 camera capture
   - YOLO bear detection
-  - bear approach judgement
+  - bear detection judgement
   - JSON Lines / CSV logging
   ↓
 Existing decision logic
-  - ai_bear_approaching
+  - ai_bear_detected
   - paw_contact / resistance measurement
   - honey_amount_percent
   - system_safe
@@ -182,7 +182,7 @@ The first MVP should demonstrate the following.
 
 ```text
 simulated_bear_detected
-ai_bear_approaching
+ai_bear_detected
 simulated_paw_contact
 raw_contact_value
 simulated_honey_amount_percent
@@ -194,7 +194,7 @@ emergency_stop
 
 ```text
 release_allowed = (
-    ai_bear_approaching
+    ai_bear_detected
     and paw_contact
     and honey_amount_percent >= honey_min_threshold_percent
     and system_safe
@@ -277,7 +277,7 @@ Honey release is allowed only when all required conditions are satisfied:
 
 ```python
 release_allowed = (
-    ai_bear_approaching
+    ai_bear_detected
     and paw_contact
     and honey_amount_percent >= honey_min_threshold_percent
     and system_safe
@@ -311,7 +311,7 @@ timestamp,bear_detected,paw_contact,honey_amount_percent,system_safe,emergency_s
 Camera AI also emits JSON Lines from Raspberry Pi:
 
 ```json
-{"source":"camera_ai","ai_camera_ok":true,"ai_model_ok":true,"ai_bear_detected":true,"ai_bear_confidence":0.82,"ai_bear_box_area_ratio":0.18,"ai_bear_approaching":true,"event":"AI_BEAR_APPROACHING"}
+{"source":"camera_ai","ai_camera_ok":true,"ai_model_ok":true,"ai_bear_detected":true,"ai_bear_confidence":0.82,"ai_bear_box_area_ratio":0.18,"event":"AI_BEAR_DETECTED"}
 ```
 
 These camera AI fields are inputs to the safety decision layer only. They do not directly command `RELEASE_ON`.
@@ -406,7 +406,7 @@ Hardware and runtime assumptions:
 - Fallback model path: models/yolo_bear.pt
 - Recommended resolution: 320x240 on Raspberry Pi 4B
 - Recommended FourCC: MJPG first, then YUYV fallback
-- Failure behavior: ai_bear_approaching=false
+- Failure behavior: ai_bear_detected=false
 ```
 
 If all configured model paths are missing, the system outputs `AI_MODEL_LOAD_ERROR`, sets `ai_model_ok=false`, and remains fail-safe.
@@ -494,7 +494,7 @@ fuser -v /dev/video0
 | `arduino_uno_q/contact_pad_controller/` | Main Arduino Uno controller. Simulated inputs, contact-pad state machine, honey threshold check, RELEASE_ON/OFF output, LED/GPIO, JSON Lines output. |
 | `raspberry_pi/logger/` | Raspberry Pi serial logger. Receives Arduino and AI JSON Lines and saves CSV logs. |
 | `raspberry_pi/dashboard/` | Simple dashboard for demo and monitoring. Shows the latest contact, AI, and release state. |
-| `raspberry_pi/camera_ai/` | Optional Raspberry Pi camera AI perception layer. Tests `/dev/video0`, loads YOLO, estimates bear approach, and publishes AI state. It must not directly command honey release. |
+| `raspberry_pi/camera_ai/` | Optional Raspberry Pi camera AI perception layer. Tests `/dev/video0`, loads YOLO, detects bears, and publishes AI state. It must not directly command honey release. |
 | `docs/` | Design documents, block diagram, state machine, interface specs, and camera AI notes. |
 | `data/logs/` | Runtime CSV/JSONL logs. Generated logs are normally kept out of Git except small samples. |
 | `examples/` | Small sample input/output files for demos and documentation. |
@@ -532,7 +532,7 @@ fuser -v /dev/video0
 [ ] Place or export models/yolo_bear_ncnn_model
 [ ] Confirm AI_MODEL_LOAD_ERROR disappears
 [ ] Run YOLO inference on camera frames
-[ ] Publish ai_bear_approaching fail-safe output
+[ ] Publish ai_bear_detected fail-safe output
 ```
 
 ### Phase 4: AI State Logging and Dashboard Integration
@@ -540,7 +540,7 @@ fuser -v /dev/video0
 ```text
 [ ] Log camera AI JSON Lines / CSV
 [ ] Show ai_camera_ok and ai_model_ok
-[ ] Show ai_bear_detected and ai_bear_approaching
+[ ] Show ai_camera_ok, ai_model_ok, and ai_bear_detected
 [ ] Display contact and release state together
 ```
 
@@ -565,7 +565,7 @@ fuser -v /dev/video0
 ### Phase 7: Full System Demo with Fail-Safe Behavior
 
 ```text
-[ ] Camera AI detects approach
+[ ] Camera AI detects a bear
 [ ] Contact/resistance layer confirms paw_contact
 [ ] Honey and safety checks pass
 [ ] Emergency stop forces RELEASE_OFF
@@ -580,7 +580,7 @@ Use the following explanation.
 
 ```text
 I will develop the front paw contact pad system as a separate electronic/control module.
-Raspberry Pi 4B with a BUFFALO BSW500M camera will be used for YOLO-based bear approach detection, logging, and dashboard support.
+Raspberry Pi 4B with a BUFFALO BSW500M camera will be used for YOLO-based bear detection, logging, and dashboard support.
 Arduino Uno and the contact/resistance layer remain responsible for contact confirmation and fail-safe release logic.
 PCA9685 and a servo motor will be used on the honey release mechanism side.
 Camera AI is an additional perception layer, not the only safety controller.
@@ -608,7 +608,7 @@ Camera AI is an additional perception layer, not the only safety controller.
 [ ] Uno can generate simulated inputs
 [ ] Uno can decide RELEASE_ON/OFF
 [ ] Raspberry Pi can capture from /dev/video0
-[ ] Camera AI can publish fail-safe ai_bear_approaching
+[ ] Camera AI can publish fail-safe ai_bear_detected
 [ ] RELEASE_ON/OFF is visible through LED or serial output
 [ ] Raspberry Pi can receive the state
 [ ] Raspberry Pi can save CSV logs
@@ -913,4 +913,4 @@ CSV columns: `timestamp`, `command`, `serial_command`, `demo_enabled`,
 
 ## One-Sentence Summary
 
-This project uses Raspberry Pi 4B with a BUFFALO BSW500M USB camera for YOLO-based bear approach detection, while preserving the Arduino/contact-pad safety logic so that honey release is allowed only after AI detection, contact confirmation, honey availability, and safety checks are satisfied.
+This project uses Raspberry Pi 4B with a BUFFALO BSW500M USB camera for YOLO-based bear detection, while preserving the Arduino/contact-pad safety logic so that honey release is allowed only after AI detection, contact confirmation, honey availability, and safety checks are satisfied.

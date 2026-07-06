@@ -1801,7 +1801,10 @@ Colab のデフォルト Python 3.12 + torch 2.11 環境で `onnxscript` が
 
 - `README.md`
 - `README.ja.md`
+- `README.ko.md`
+- `README_PATCH_USAGE_JP.md`
 - `README.zh-CN.md`
+- `.gitignore`
 - `DEVELOPMENT_NOTES.md`
 
 変更内容:
@@ -1895,3 +1898,159 @@ Colab のデフォルト Python 3.12 + torch 2.11 環境で `onnxscript` が
 
 - 会場照明が大きく変わる場合は `CAMERA_V4L2_CONTROLS=... ./scripts/run_demo.sh` で saturation / gain / brightness を現場調整する。
 - カメラに強い逆光の窓が入ると顔が暗くなるため、可能なら窓を避ける向きに置く。
+
+### 2026-07-06T14:42:50+09:00 — GODA 0to90 actuator bear-detection one-shot and bilingual portal status
+
+根拠: ファイルシステム編集時刻。Gitコミット日時ではない。
+
+目的:
+
+- `Haruka GODA/beehivemotorC++/0to90.ino` を、熊検出または `RELEASE` シリアル指示で 90度の排出動作を1回だけ行うスケッチへ更新する。
+- 過剰動作を避けるため、Arduino 側で最大10秒に1回のレート制限を入れる。
+- Dashboard portal で Camera AI 状態と排出メッセージを英語・日本語でわかりやすく表示する。
+
+変更ファイル:
+
+- `Haruka GODA/beehivemotorC++/0to90.ino`
+- `raspberry_pi/dashboard/app.py`
+- `raspberry_pi/safety_control/safety_controller.py`
+- `tests/test_dashboard.py`
+- `tests/test_safety_controller.py`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- `0to90.ino` をボタンの0/90トグルから、`RELEASE` / `OPEN` / `TEST` / `SET AI_BEAR 1` / `AI_BEAR_DETECTED` / JSON風の検出行を受けるシリアル対応スケッチへ変更した。
+- 検出時は 0度から90度へ動かし、短く保持してから0度へ戻す1サイクルにした。
+- `dispenseCooldownMs = 10000` を追加し、10秒以内の再検出は `COOLDOWN_BLOCKED_RELEASE_OFF` として動作しないようにした。
+- `STOP` / `CLOSE` / `EMERGENCY_STOP` / `ESTOP` / `RESET` は閉位置0度へ戻す安全側コマンドとして扱うようにした。`RESET` でも10秒クールダウンは解除しない。
+- Dashboard の Camera AI State に `ai_camera_status / AI Camera Status / AIカメラ状態` を追加した。
+- Feeding Safety Decision に `Detected → Dispensing / 検出済み➡排出します` と `Rate limit: maximum once per 10 seconds / 動作上限: 10秒に1回` の表示を追加した。
+- safety controller の `camera_status` CSV値を `Detected / 検出済み`、`No bear detected / 熊未検出`、`Camera error / カメラ異常`、`Simulated input / シミュレーション入力` の英日併記にした。
+
+安全・インターフェースへの影響:
+
+- Arduino actuator は初期状態と停止時に0度、シリアル異常や未知コマンドでは排出しない。
+- 排出動作は Arduino 側で10秒に1回までに制限されるため、portal や bridge から連続コマンドが来ても過剰動作しにくい。
+- `RELEASE` / `STOP` 既存シリアルコマンドは維持し、`SET AI_BEAR 1` と `AI_BEAR_DETECTED` を追加対応した。
+- Raspberry Pi 側の release safety decision は引き続き既存 state machine と fail-safe `RELEASE_OFF` を使う。
+- Dashboard/API には表示用の `ai_camera_status`、`release_action_message`、`release_rate_limit_message` を追加したが、既存 CSV field name は削除していない。
+
+検証:
+
+- `.venv/bin/python -m pytest tests/test_dashboard.py tests/test_safety_controller.py tests/test_safety_to_actuator.py`
+  → 24 passed。
+- `.venv/bin/python -m pytest`
+  → 71 passed。
+- `arduino-cli compile --fqbn arduino:avr:uno 'Haruka GODA/beehivemotorC++/0to90.ino'`
+  → 同一フォルダ内の既存 `beehivemotorC++.ino` も Arduino CLI が同時に拾い、`setup()` / `loop()` 重複で失敗することを確認。
+- `/tmp/goda_0to90_compile` に `0to90.ino` を単体スケッチとしてコピーして `arduino-cli compile --fqbn arduino:avr:uno /tmp/goda_0to90_compile`
+  → コンパイル成功。Sketch 7816 bytes、global variables 931 bytes。
+
+結果:
+
+- 指定スケッチ単体では、Camera AI / portal / bridge からの検出または `RELEASE` 指示で90度排出サイクルを1回だけ行い、10秒以内の再動作を止められる状態になった。
+- Portal では AI カメラ状態と排出状態が英語・日本語で読めるようになった。
+
+残課題:
+
+- Arduino IDE / CLI でこの `0to90.ino` だけをアップロードする場合、既存 `beehivemotorC++.ino` と同じフォルダにあるため、`0to90.ino` を単体スケッチフォルダとして開く運用が必要。
+- 実機自動デモでは `RUN_ACTUATOR_BRIDGE=1` を付けて safety-to-actuator bridge を有効化し、サーボの実回転方向と排出口の機械位置を確認する。
+
+### 2026-07-06T14:47:18+09:00 — Camera AI detected-only signal and lightweight dashboard refresh
+
+根拠: ファイルシステム編集時刻および Raspberry Pi 4B + BUFFALO BSW500M 実機確認。Gitコミット日時ではない。
+
+目的:
+
+- Camera AI / safety / dashboard から `ai_bear_approaching` と `bear_approaching` を廃止し、熊認識入力を `ai_bear_detected` / `bear_detected` に一本化する。
+- 熊を認識したあとに dashboard ページ全体がリフレッシュされて重くなる挙動をやめ、軽量 JSON API の差分更新にする。
+- 旧CSVヘッダーが残っていて列ずれする問題を防ぎ、古いログを自動退避して新しいインターフェースで再作成する。
+
+変更ファイル:
+
+- `README.md`
+- `README.ja.md`
+- `README.zh-CN.md`
+- `docs/GODA_ACTUATOR_INTEGRATION_INSTRUCTIONS_JP.md`
+- `docs/camera_ai_design.md`
+- `docs/camera_ai_interface_spec.md`
+- `docs/feature_overview.md`
+- `docs/interface_spec.md`
+- `docs/repository_map.md`
+- `docs/state_machine.md`
+- `raspberry_pi/camera_ai/README.md`
+- `raspberry_pi/camera_ai/__init__.py`
+- `raspberry_pi/camera_ai/ai_state_publisher.py`
+- `raspberry_pi/camera_ai/approach_logic.py`
+- `raspberry_pi/camera_ai/config.camera_ai.yaml`
+- `raspberry_pi/camera_ai/run_camera_ai.py`
+- `raspberry_pi/camera_ai/web_camera_ai.py`
+- `raspberry_pi/dashboard/app.py`
+- `raspberry_pi/integration/fake_bear_to_actuator.py`
+- `raspberry_pi/safety_control/safety_controller.py`
+- `raspberry_pi/test_tools/fake_camera_ai_jsonl.py`
+- `scripts/run_demo.sh`
+- `tests/test_camera_ai_approach_logic.py`
+- `tests/test_camera_ai_publisher.py`
+- `tests/test_camera_ai_web_viewer.py`
+- `tests/test_dashboard.py`
+- `tests/test_safety_controller.py`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- Camera AI の出力CSV/JSONを `ai_bear_detected`、`ai_bear_confidence`、`ai_bear_box_area_ratio`、`event` に整理し、`AI_BEAR_APPROACHING` event を `AI_BEAR_DETECTED` に置き換えた。
+- `ApproachDecision` と `AiState` から `ai_bear_approaching` を削除した。
+- safety controller の入力判定を `ai_bear_detected` のみにし、`WAIT_APPROACH` を廃止して検出後は `WAIT_CONTACT` / contact confirmation へ進むようにした。
+- dashboard の Camera AI State から approaching 行を削除し、`/api/dashboard-state` を追加して `data-live-key` のセルだけを更新するようにした。
+- 以前の `DOMParser` + `<main>` 丸ごと差し替えを削除し、検出後もページ全体を再読み込みしないようにした。
+- demo control form は JavaScript fetch で送信し、送信後も軽量APIで状態だけ更新するようにした。
+- Camera AI CSV と safety decision CSV の既存ヘッダーが現行スキーマと異なる場合、`*.legacy_<timestamp>.csv` に退避してから新ヘッダーで書き直すようにした。
+- `scripts/run_demo.sh` に `flock` ベースの起動ロックを追加し、同じデモが二重起動して `/dev/video0` を取り合わないようにした。
+- `data/logs/*.lock` と `data/logs/*.pid` を `.gitignore` に追加し、実行時ロックファイルをGit対象外にした。
+- README / docs / fake input tools / integration helper の説明とサンプルを detected-only に更新した。
+
+安全・インターフェースへの影響:
+
+- Raspberry Pi Camera AI は `ai_bear_detected` を補助入力として出すだけで、単独では `RELEASE_ON` を命令しない。
+- release allowed 条件は `bear_detected && paw_contact/contact_confirmed && honey_enough && system_safe && !emergency_stop` を維持する。
+- カメラログと safety ログのCSV列から old approaching fields を削除したため、旧ログは自動的に legacy ファイルへ退避される。
+- `run_demo.sh` の2本目は即終了するため、Camera AI の二重起動による `AI_CAMERA_OPEN_ERROR` が起きにくくなる。
+- 欠損データ、カメラ異常、モデル異常、旧ヘッダー列ずれ時も RELEASE_OFF / HOLD 側に倒す方針は維持した。
+
+検証:
+
+- `python -m py_compile raspberry_pi/camera_ai/ai_state_publisher.py raspberry_pi/camera_ai/approach_logic.py raspberry_pi/camera_ai/run_camera_ai.py raspberry_pi/camera_ai/web_camera_ai.py raspberry_pi/safety_control/safety_controller.py raspberry_pi/dashboard/app.py raspberry_pi/test_tools/fake_camera_ai_jsonl.py raspberry_pi/integration/fake_bear_to_actuator.py`
+  → OK。
+- `.venv/bin/python -m pytest`
+  → 72 passed。
+- `.venv/bin/python -m raspberry_pi.camera_ai.run_camera_ai --device auto --terminal-status --once --save-debug-frames`
+  → 出力JSONに `ai_bear_approaching` が無く、`ai_bear_detected` と `AI_NO_BEAR` / `AI_BEAR_DETECTED` だけになることを確認。
+- 既存 `data/logs/camera_ai_log.csv` は `camera_ai_log.legacy_20260706T143817+0900.csv` に退避され、新ヘッダーで再作成された。
+- 既存 `data/logs/feeding_decision_log.csv` は `feeding_decision_log.legacy_20260706T144621+0900.csv` に退避され、新ヘッダーで再作成された。
+- 合成 camera log の `ai_bear_detected=true` で safety controller を実行し、`BEAR_DETECTED` / `WAIT_CONTACT` になり `WAIT_APPROACH` が出ないことを確認。
+- `setsid env RUN_ACTUATOR_BRIDGE=0 ./scripts/run_demo.sh` で実機デモを起動し、`http://127.0.0.1:8080/`、`/api/dashboard-state`、`/camera/latest.jpg` を5回ポーリング。
+  → すべて 200。`AI_BEAR_DETECTED` 後も API JSON に `ai_bear_approaching`、`bear_approaching`、`WAIT_APPROACH` は出なかった。
+- HTML/JS確認:
+  → `fetch("/api/dashboard-state")` と `data-live-key` 更新を確認。`DOMParser` と `<main>` 丸ごと置換処理は残っていない。
+- 実機ログ確認:
+  → Camera AI は `AI_NO_BEAR` と `AI_BEAR_DETECTED` を交互に出力し、safety log は `READY_TO_RELEASE`、`RELEASING`、`COOLDOWN` まで遷移した。
+- `bash -n scripts/run_demo.sh`
+  → OK。
+- ロック付き `run_demo.sh` 起動中に2本目を実行
+  → status 2、`Another run_demo.sh is already running (pid ...)` で停止。2本目は `/dev/video0` を開かなかった。
+- ロック付き再起動後に `/api/dashboard-state` を5回ポーリング
+  → `ai_camera_ok=True`、`ai_model_ok=True`、`event=AI_NO_BEAR` が継続。`fuser -v /dev/video0` では Camera AI の1プロセスのみがカメラを保持。
+
+結果:
+
+- `ai_bear_approaching` は実装・表示・主要ドキュメントから削除され、旧CSV互換テストの入力データとしてだけ残った。
+- dashboard は検出後もページ全体を再描画せず、軽量APIで状態セルだけ更新する構成になった。
+- 旧CSVヘッダー起因の列ずれが解消され、APIに `bear_approaching` が混入しなくなった。
+- デモ二重起動による Camera AI の `/dev/video0` open error は、起動ロックで再発しにくくなった。
+
+残課題:
+
+- 実会場では `http://192.168.137.128:8080` または `http://<pi-ip>:8080` を実ブラウザで開き、長時間表示でもCPU/メモリと映像更新が安定するか確認する。
+- 現在のデモは `MOCK_CONTACT=1` のため、実接触パッド統合時は Arduino Uno Q 側の contact confirmation を優先入力に切り替える。

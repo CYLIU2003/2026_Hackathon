@@ -24,12 +24,12 @@ Raspberry Pi 4B camera_ai
   |
   +-- bear_detector.py: lightweight YOLO runtime wrapper, returns detections
   |
-  +-- approach_logic.py: confidence, bbox area, consecutive detection
+  +-- approach_logic.py: confidence-thresholded bear detection
   |
   +-- ai_state_publisher.py: JSON Lines and camera AI CSV log
   |
   v
-ai_bear_approaching support signal
+ai_bear_detected support signal
 ```
 
 The camera AI support signal is separate from the Arduino Uno Q contact-pad release controller.
@@ -38,10 +38,10 @@ The camera AI support signal is separate from the Arduino Uno Q contact-pad rele
 
 ```text
 Camera AI:
-  - detect possible bear approach
+  - detect possible bear presence
   - prefer Pi-friendly exported YOLO formats such as NCNN
   - keep camera driver/reopen logic separate from inference and dashboard code
-  - publish ai_bear_approaching
+  - publish ai_bear_detected
   - fail safe to false on errors
 
 Contact pad / release controller:
@@ -57,10 +57,7 @@ AI_NO_BEAR:
   no configured target class above confidence threshold
 
 AI_BEAR_DETECTED:
-  target class was detected, but approach criteria are not yet satisfied
-
-AI_BEAR_APPROACHING:
-  target class, confidence, bbox area, and consecutive count criteria are satisfied
+  target class was detected above confidence threshold
 ```
 
 ## Safety Boundary

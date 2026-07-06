@@ -22,7 +22,6 @@ CSV_FIELDS = [
     "event",
     "camera_status",
     "bear_detected",
-    "bear_approaching",
     "confidence",
     "bear_box_area_ratio",
     "contact_detected",
@@ -89,7 +88,6 @@ class SensorSnapshot:
     honey_amount_percent: int
     system_safe: bool
     emergency_stop: bool
-    bear_approaching: Optional[bool] = None
     source_ok: bool = True
     source_error: str = ""
     scenario_step: str = ""
@@ -145,7 +143,6 @@ class SafetyStateMachine:
 
         release_allowed = (
             inputs.bear_detected
-            and self._bear_ready(inputs)
             and contact_confirmed
             and honey_enough
             and inputs.system_safe
@@ -209,7 +206,7 @@ class SafetyStateMachine:
         elif self.state == State.BEAR_DETECTED:
             if not inputs.bear_detected:
                 self._enter(State.IDLE, "NO_BEAR", now_ms)
-            elif self._bear_ready(inputs) and contact_confirmed:
+            elif contact_confirmed:
                 self._enter(State.CONTACT_CONFIRMED, "CONTACT_CONFIRMED", now_ms)
         elif self.state == State.CONTACT_CONFIRMED:
             if not inputs.bear_detected:
@@ -273,8 +270,6 @@ class SafetyStateMachine:
             return "SAFE_TO_FEED"
         if not inputs.bear_detected:
             return "IDLE"
-        if not self._bear_ready(inputs):
-            return "WAIT_APPROACH"
         if not contact_confirmed:
             return "WAIT_CONTACT"
         if not honey_enough:
@@ -282,13 +277,6 @@ class SafetyStateMachine:
         if not inputs.system_safe:
             return "HOLD_UNSAFE"
         return "HOLD"
-
-    @staticmethod
-    def _bear_ready(inputs: SensorSnapshot) -> bool:
-        if inputs.bear_approaching is None:
-            return inputs.bear_detected
-        return inputs.bear_approaching
-
 
 class ScenarioInput:
     def __init__(self, config: SafetyConfig) -> None:
@@ -322,7 +310,6 @@ class ScenarioInput:
     ) -> SensorSnapshot:
         return SensorSnapshot(
             bear_detected=bear,
-            bear_approaching=bear,
             confidence=0.86 if bear else None,
             bear_box_area_ratio=0.18 if bear else None,
             contact_detected=contact,
@@ -380,13 +367,11 @@ class CameraCsvInput:
             return self._error("camera or model is not ready")
 
         bear_detected = parse_bool(row.get("ai_bear_detected"))
-        bear_approaching = parse_bool(row.get("ai_bear_approaching"))
-        contact = self.mock_contact and bear_approaching
+        contact = self.mock_contact and bear_detected
         reset_requested = self._reset_after_recovery
         self._reset_after_recovery = False
         return SensorSnapshot(
             bear_detected=bear_detected,
-            bear_approaching=bear_approaching,
             confidence=parse_optional_float(row.get("ai_bear_confidence")),
             bear_box_area_ratio=parse_optional_float(
                 row.get("ai_bear_box_area_ratio")
@@ -436,12 +421,38 @@ def now_iso8601() -> str:
 
 def append_csv(path: Path, row: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    rotate_csv_if_schema_changed(path)
     write_header = not path.exists()
     with path.open("a", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
         if write_header:
             writer.writeheader()
         writer.writerow({field: row.get(field, "") for field in CSV_FIELDS})
+
+
+def rotate_csv_if_schema_changed(path: Path) -> None:
+    if not path.exists() or path.stat().st_size == 0:
+        return
+    try:
+        with path.open("r", newline="", encoding="utf-8") as handle:
+            header = next(csv.reader(handle), [])
+    except (OSError, csv.Error):
+        return
+    if header == CSV_FIELDS:
+        return
+    timestamp = datetime.now(timezone.utc).astimezone().strftime("%Y%m%dT%H%M%S%z")
+    legacy_path = path.with_name(f"{path.stem}.legacy_{timestamp}{path.suffix}")
+    path.rename(legacy_path)
+
+
+def describe_camera_status(inputs: SensorSnapshot, input_mode: str) -> str:
+    if input_mode == "scenario":
+        return "Simulated input / シミュレーション入力"
+    if not inputs.source_ok:
+        return "Camera error / カメラ異常"
+    if inputs.bear_detected:
+        return "Detected / 検出済み"
+    return "No bear detected / 熊未検出"
 
 
 def build_record(
@@ -460,13 +471,8 @@ def build_record(
             "READY_TO_RELEASE": "SAFE_TO_FEED",
             "RELEASING": "FEEDING",
         }.get(state, state),
-        "camera_status": (
-            "Simulated"
-            if input_mode == "scenario"
-            else ("Running" if inputs.source_ok else "Error")
-        ),
+        "camera_status": describe_camera_status(inputs, input_mode),
         "bear_detected": inputs.bear_detected,
-        "bear_approaching": inputs.bear_approaching,
         "confidence": inputs.confidence,
         "bear_box_area_ratio": inputs.bear_box_area_ratio,
         "contact_detected": inputs.contact_detected,

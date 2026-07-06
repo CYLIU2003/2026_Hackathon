@@ -9,6 +9,8 @@ __pycache__/
 # Runtime logs and debug captures
 data/logs/*.csv
 data/logs/*.log
+data/logs/*.lock
+data/logs/*.pid
 data/debug_frames/
 
 # Training datasets and large source caches stay local.

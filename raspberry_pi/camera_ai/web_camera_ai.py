@@ -72,7 +72,6 @@ HTML_TEMPLATE = """<!doctype html>
       <div class="status">
         <div class="item"><div class="label">event</div><div id="event" class="value">-</div></div>
         <div class="item"><div class="label">bear</div><div id="bear" class="value">-</div></div>
-        <div class="item"><div class="label">approaching</div><div id="approaching" class="value">-</div></div>
         <div class="item"><div class="label">confidence</div><div id="confidence" class="value">-</div></div>
         <div class="item"><div class="label">area</div><div id="area" class="value">-</div></div>
         <div class="item"><div class="label">inference ms</div><div id="inference" class="value">-</div></div>
@@ -87,7 +86,6 @@ HTML_TEMPLATE = """<!doctype html>
         function text(id, value) { document.getElementById(id).textContent = value ?? '-'; }
         text('event', data.event);
         text('bear', data.ai_bear_detected ? 'yes' : 'no');
-        text('approaching', data.ai_bear_approaching ? 'yes' : 'no');
         text('confidence', data.ai_bear_confidence == null ? '-' : Number(data.ai_bear_confidence).toFixed(2));
         text('area', data.ai_bear_box_area_ratio == null ? '-' : (Number(data.ai_bear_box_area_ratio) * 100).toFixed(1) + '%');
         text('inference', data.inference_time_ms == null ? '-' : Number(data.inference_time_ms).toFixed(1));
@@ -163,11 +161,10 @@ def draw_detections(cv2, frame, detections: list[dict[str, Any]], record: dict[s
         )
 
     event = str(record.get("event", "-"))
-    approaching = "APPROACHING" if record.get("ai_bear_approaching") else "watching"
     cv2.rectangle(annotated, (0, 0), (annotated.shape[1], 34), (0, 0, 0), -1)
     cv2.putText(
         annotated,
-        f"{event} | {approaching}",
+        event,
         (8, 23),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.65,
@@ -191,7 +188,6 @@ def terminal_status(record: dict[str, Any]) -> str:
         f"{record.get('timestamp', '-')} "
         f"event={record.get('event', '-')} "
         f"bear={'yes' if record.get('ai_bear_detected') else 'no'} "
-        f"approaching={'yes' if record.get('ai_bear_approaching') else 'no'} "
         f"conf={record.get('ai_bear_confidence')} "
         f"infer_ms={record.get('inference_time_ms')}"
     )
@@ -299,7 +295,6 @@ def camera_ai_worker(args: argparse.Namespace, shared_state: SharedCameraAiState
                         ai_bear_detected=decision.ai_bear_detected,
                         ai_bear_confidence=decision.ai_bear_confidence,
                         ai_bear_box_area_ratio=decision.ai_bear_box_area_ratio,
-                        ai_bear_approaching=decision.ai_bear_approaching,
                         event=decision.event,
                         inference_time_ms=round(inference_time_ms, 2),
                     )
@@ -321,7 +316,6 @@ def camera_ai_worker(args: argparse.Namespace, shared_state: SharedCameraAiState
                 "ai_camera_ok": False,
                 "ai_model_ok": False,
                 "ai_bear_detected": False,
-                "ai_bear_approaching": False,
                 "inference_time_ms": None,
             },
             error_message=str(exc),
