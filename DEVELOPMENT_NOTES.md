@@ -1786,3 +1786,112 @@ Colab のデフォルト Python 3.12 + torch 2.11 環境で `onnxscript` が
 
 - 実機 BUFFALO BSW500M で、長時間デモ中の黒画面復旧と MJPEG dashboard の安定性を再確認する。
 - UVC/USBレベルで `VIDIOC_STREAMON` が失敗する場合は、コードではなくケーブル、電源、USBポート、UVC driver quirk の確認が必要。
+
+### 2026-07-06T14:10:39+09:00 — BUFFALO BSW500M OpenCV fallback のREADME反映
+
+根拠: ファイルシステム編集時刻および Raspberry Pi 4B 実機確認。Gitコミット日時ではない。
+
+目的:
+
+- 会場で使う BUFFALO BSW500M について、`/dev/video1` metadata node を誤って使わない前提を再確認する。
+- `./scripts/run_demo.sh` / Camera AI の既定 `device=auto` が BSW500M の Video Capture node を選ぶことを実機で確認する。
+- OpenCV が `/dev/video0` のパス名で開けない場合に、同じノードの index `0` へフォールバックする挙動を README に明記する。
+
+変更ファイル:
+
+- `README.md`
+- `README.ja.md`
+- `README.zh-CN.md`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- 既存 README の BSW500M USB ID `0411:02da`、`device=auto`、`/dev/video0` / `/dev/video1` metadata の説明を実機で確認した。
+- OpenCV path open が失敗した場合の `/dev/video0` -> index `0` fallback を README 3言語に追記した。
+
+安全・インターフェースへの影響:
+
+- ドキュメント更新のみ。Arduino Uno Q の release decision、接触パッド状態機械、serial protocol、CSV interface は変更なし。
+- Camera AI は引き続き追加の認識レイヤーであり、`RELEASE_ON` を単独で命令しない。
+- カメラ未接続、metadata node 誤選択、OpenCV capture failure は安全側入力として扱われ、`ai_bear_approaching=false` / HOLD / RELEASE_OFF 側に倒す。
+
+検証:
+
+- `lsusb` → `0411:02da BUFFALO INC. ... USB 2.0 Camera` を確認。
+- `v4l2-ctl --device=/dev/video0 --all` → `Device Caps: Video Capture` を確認。
+- `v4l2-ctl --device=/dev/video1 --all` → `Device Caps: Metadata Capture` のみであることを確認。
+- `.venv/bin/python -c 'from raspberry_pi.camera_ai.camera_capture import resolve_camera_source, video_device_has_video_capture, video_device_usb_ids; ...'`
+  → `auto` が `/dev/video0`、Video Capture `True`、USB ID `('0411', '02da')` に解決。
+- `.venv/bin/python raspberry_pi/camera_ai/camera_test.py --device auto --no-save`
+  → Camera OK、`selected_profile=320x240 5fps MJPG`。
+- `.venv/bin/python -m raspberry_pi.camera_ai.run_camera_ai --device auto --terminal-status --no-jsonl --once --no-inference --save-debug-frames`
+  → `event=AI_INFERENCE_DISABLED camera=ok model=error ... device=/dev/video0`。
+- `.venv/bin/python -m pytest`
+  → 67 passed。
+
+結果:
+
+- BUFFALO BSW500M 前提で、README から `device=auto`、`/dev/video0`、`/dev/video1` metadata、OpenCV index fallback の関係が追えるようになった。
+- 実機では `auto` が正しく BSW500M の映像ストリームへ解決し、Camera AI の fail-safe 一回実行も成功した。
+
+残課題:
+
+- 長時間の会場デモでは `./scripts/run_demo.sh` を一回だけ起動し、別プロセスで `/dev/video0` を開かない運用を徹底する。
+- 明るさ、露出、カメラ向き、熊画像との距離は現場照明で再調整する。
+
+### 2026-07-06T14:18:43+09:00 — Camera AI 表示の灰色化修正
+
+根拠: ファイルシステム編集時刻および Raspberry Pi 4B + BUFFALO BSW500M 実機確認。Gitコミット日時ではない。
+
+目的:
+
+- Dashboard / `latest_camera_ai.jpg` のカメラ画面が灰色に見える状態を、複数回の出力追跡で原因分解して修正する。
+- 通常ライブフレームはカラー表示に戻し、暗フレーム診断画面だけ灰色表示を残す。
+- BSW500M 実機で白飛びしにくい V4L2 デモ既定値へ変更する。
+
+変更ファイル:
+
+- `raspberry_pi/camera_ai/run_camera_ai.py`
+- `scripts/run_demo.sh`
+- `raspberry_pi/camera_ai/README.md`
+- `tests/test_camera_ai_display.py`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- `prepare_display_frame()` の最後で通常フレームを強制的に grayscale/BGR 変換していた処理を削除し、カラーを保持するようにした。
+- `scripts/run_demo.sh` の既定 `CAMERA_V4L2_CONTROLS` を、実機で白飛びしていた `brightness=32,gain=80,gamma=180,backlight_compensation=6,saturation=55` から、`brightness=0,gain=0,gamma=100,backlight_compensation=3,contrast=32,saturation=80,auto_exposure=3,exposure_dynamic_framerate=0` へ変更した。
+- Camera AI README の V4L2 説明を brightness/exposure boost から BSW500M balanced preset に更新した。
+- 表示用フレームが色チャンネル差を保持する単体テストを追加した。
+
+安全・インターフェースへの影響:
+
+- 表示品質とカメラ入力の安定化のみ。Arduino Uno Q の release decision、状態機械、serial protocol、CSV interface は変更なし。
+- Camera AI は引き続き `ai_bear_approaching` の補助入力のみを出し、`RELEASE_ON` を単独で命令しない。
+- カメラ異常時は既存どおり `ai_camera_ok=false` / `ai_bear_approaching=false` で HOLD / RELEASE_OFF 側へ倒す。
+
+検証:
+
+- 最新 `latest_camera_ai.jpg` の修正前確認 → B/G/R 平均と標準偏差が完全一致し、`bg_diff=0.00`, `gr_diff=0.00`。表示処理が灰色化していることを確認。
+- 修正後に `.venv/bin/python -m raspberry_pi.camera_ai.run_camera_ai --device auto --terminal-status --no-jsonl --max-iterations 4 --save-debug-frames`
+  → `bg_diff` / `gr_diff` が 1.9〜4.7 程度に回復。
+- V4L2 を BSW500M balanced preset に変更後、同じコマンドで複数回追跡
+  → `mean` 約115、`std` 約67、`bg_diff` / `gr_diff` 約13、白飛び約3.7%。
+- `timeout 14s env RUN_CAMERA_AI=1 RUN_SAFETY_CONTROL=0 RUN_DASHBOARD=0 RUN_SERIAL_LOGGER=0 RUN_ACTUATOR_BRIDGE=0 ./scripts/run_demo.sh`
+  → `Applying camera controls on /dev/video0...`、latest frame `mean=115.8`, `std=67.8`, `bg_diff=7.83`, `gr_diff=11.47`。
+- 最新フレーム目視 → グレースケールではなく、人物・服・室内がカラーで表示されることを確認。
+- `bash -n scripts/run_demo.sh` → OK。
+- `.venv/bin/python -m pytest tests/test_camera_ai_display.py tests/test_camera_capture_config.py tests/test_dashboard.py`
+  → 27 passed。
+- `.venv/bin/python -m pytest`
+  → 68 passed。
+
+結果:
+
+- Camera AI dashboard 用の通常ライブ画面はカラー表示になり、灰色一色ではなくなった。
+- BSW500M の実機画面は白飛びが減り、人物と室内の輪郭・色が確認できる状態になった。
+
+残課題:
+
+- 会場照明が大きく変わる場合は `CAMERA_V4L2_CONTROLS=... ./scripts/run_demo.sh` で saturation / gain / brightness を現場調整する。
+- カメラに強い逆光の窓が入ると顔が暗くなるため、可能なら窓を避ける向きに置く。

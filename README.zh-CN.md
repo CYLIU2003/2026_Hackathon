@@ -120,6 +120,7 @@ BUFFALO BSW500M USB Web摄像头连接到 Raspberry Pi 4B。
 - /dev/video0: 实际图像流设备
 - /dev/video1: metadata device，不能用于图像采集
 - 默认配置: device=auto，会优先选择 0411:02da 的 Video Capture 节点并跳过 metadata 节点
+- 如果 OpenCV 无法用 /dev/video0 路径打开，会自动fallback到同一节点的 index 0
 - 推荐FourCC: 先MJPG，失败时fallback到YUYV
 - 推荐分辨率: 先640x480，失败时fallback到320x240
 ```

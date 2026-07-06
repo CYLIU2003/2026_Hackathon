@@ -69,9 +69,10 @@ What you should see:
 `./scripts/run_demo.sh` resolves `CAMERA_DEVICE=auto` to the BSW500M video
 capture node before opening the camera. On the target Pi this is `/dev/video0`;
 `/dev/video1` is the UVC metadata node and is skipped. The script also applies
-a venue-oriented V4L2 brightness/exposure boost before opening the resolved
-device. Override it with `CAMERA_V4L2_CONTROLS=...` or disable it with
-`CAMERA_APPLY_V4L2_CONTROLS=0` if the camera looks washed out.
+a BSW500M-balanced V4L2 preset before opening the resolved device:
+`brightness=0,gain=0,gamma=100,backlight_compensation=3,contrast=32,saturation=80`.
+Override it with `CAMERA_V4L2_CONTROLS=...` or disable it with
+`CAMERA_APPLY_V4L2_CONTROLS=0` if the room lighting needs a different look.
 
 The Camera AI image shown by the dashboard is written here:
 

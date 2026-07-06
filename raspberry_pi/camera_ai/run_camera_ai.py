@@ -327,8 +327,7 @@ def prepare_display_frame(cv2, frame):
     elif brightness_mean < 35.0:
         display_frame = cv2.convertScaleAbs(display_frame, alpha=1.8, beta=20)
 
-    gray_display_frame = cv2.cvtColor(display_frame, cv2.COLOR_BGR2GRAY)
-    return cv2.cvtColor(gray_display_frame, cv2.COLOR_GRAY2BGR)
+    return display_frame
 
 
 def build_dark_frame_notice(cv2, frame, record: dict):

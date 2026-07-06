@@ -120,6 +120,7 @@ BUFFALO BSW500M USB Webカメラを Raspberry Pi 4B に接続する。
 - /dev/video0: 実際の映像ストリーム
 - /dev/video1: metadata device。画像取得には使わない
 - 既定設定: device=auto。0411:02da の Video Capture ノードを優先し、metadata ノードは避ける
+- OpenCV が /dev/video0 のパス名で開けない場合は、同じノードの index 0 に自動フォールバックする
 - 推奨FourCC: まずMJPG、失敗時にYUYV
 - 推奨解像度: まず640x480、失敗時に320x240
 ```

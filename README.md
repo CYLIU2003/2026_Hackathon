@@ -128,6 +128,7 @@ The BUFFALO BSW500M USB web camera is connected to the Raspberry Pi 4B.
 - /dev/video0: actual image stream device
 - /dev/video1: metadata device, not for image capture
 - default config: device=auto, preferring the 0411:02da Video Capture node and skipping metadata nodes
+- if OpenCV cannot open the /dev/video0 path, it automatically falls back to the matching index 0
 - recommended FourCC: MJPG first, then YUYV fallback
 - recommended resolution: 640x480 first, then 320x240 fallback
 ```
