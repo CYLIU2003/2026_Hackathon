@@ -1,6 +1,6 @@
 # 開発ノート / Development Notes
 
-最終更新: 2026-07-02T15:33:33+09:00
+最終更新: 2026-07-06T09:43:45+09:00
 対象: A1 Bear Honey Buffet / Front Paw Contact Pad Safety Control System  
 タイムゾーン: Asia/Tokyo (UTC+09:00)
 
@@ -728,6 +728,56 @@ Arduino Unoの前足接触入力として接続できるようにし、既存の
 - BIA閾値は模擬物または人の手による安全な低電圧・微小電流テストで調整し、
   実動物では試験しない。
 
+### 2026-07-06T02:30:00+09:00 — ONNXエクスポートノートブック修正（torch 2.5.1 ダウングレード）
+
+担当: Codex
+
+目的:
+
+Colab のデフォルト Python 3.12 + torch 2.11 環境で `onnxscript` が
+`torch_2_11` サブモジュールを欠いており、ONNX エクスポートが
+`No module named 'onnxscript._framework_apis.torch_2_11'` で失敗する問題を修正。
+
+1回目の修正（torch 最新 + opset 18）では onnxscript のバージョン不一致が
+解消されなかったため、torch を 2.5.1 にダウングレードする方針に切り替えた。
+
+変更ファイル:
+
+- `notebooks/export_bear_yolo_onnx.ipynb`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- インストールセル: `torch==2.5.1 --index-url .../cpu` に固定。
+  torch 2.5.1 は cp312 wheel があり、onnxscript 互換性が確認されている。
+- エクスポートセル: opset=18 でエクスポート（dynamo exporter 要件）。
+- 新規セル: opset 18 → 12 変換（`onnx.version_converter`）。
+- 検証セル: opset <= 15 アサート。
+- 全 Markdown 説明を 2026-07 + torch 2.5.1 の状況に更新。
+
+安全・インターフェースへの影響:
+
+- モデルファイル (`yolo_bear.onnx`) の opset バージョンが変わる可能性が
+  あるが、推論インターフェース（入力 256x256、出力 (1,5,1344)）は不変。
+- opset 12 変換成功時は Raspberry Pi cv2.dnn 互換を維持。
+- opset 18 のままの場合は Pi 側で onnxruntime が必要。
+
+検証:
+
+- ノートブックのセル構造・コード構文を目視確認（13セル、全セル整合）。
+- Colab 実実行は未実施（ユーザー側で実行予定）。
+
+結果:
+
+- torch 2.5.1 により onnxscript 互換性の問題が解決する見込み。
+- Raspberry Pi cv2.dnn 互換の opset 12 出力を変換経由で維持。
+
+残課題:
+
+- Colab 実環境で全セルを順次実行し、エクスポートと opset 変換の成否を確認する。
+- opset 変換失敗時に備え、Pi 側 Camera AI に onnxruntime バックエンドを
+  追加するか検討する。
+
 ## 8. 今後追記用テンプレート
 
 ```markdown
@@ -761,3 +811,323 @@ Arduino Unoの前足接触入力として接続できるようにし、既存の
 
 - 
 ```
+
+### 2026-07-06T00:00:00+09:00 — ダッシュボードの全画面リロード廃止と部分更新化
+
+担当: AI assistant
+
+目的:
+
+- `./scripts/run_demo.sh` 起動時、ダッシュボードが約1秒ごとにページ全体を
+  リロードし、スタイル再適用・画像再取得・フォーム状態リセット・
+  スクロールリセットのチラつきで実用にならない問題を解消する。
+
+変更ファイル:
+
+- `raspberry_pi/dashboard/app.py`
+
+変更内容:
+
+- HTML ヘッダの `<meta http-equiv="refresh">` を廃止。ページ全体の
+  再読み込みを止めた。
+- `<main>` に `id="dashboard-main"`、`data-refresh-interval`、
+  `data-demo-enabled`、`data-emergency-stop` の各 data 属性を付与。
+- 末尾に JavaScript を追加し、`setInterval` で `/` を `fetch` し、
+  `DOMParser` で `<main>` の中身だけ差し替える部分更新を実装。
+  CSS/JS を再評価せず、ScrollTop やフォーム入力もリセットしない。
+- Demo Mode の各送信フォームに `data-demo-control` を付与し、submit を
+  インターセプトして fetch で送信後に部分更新するよう変更。
+  これにより 303 リダイレクトによる再描画のチラつきも防止。
+- `--refresh` の既定値を 1 秒から 2 秒に延長し、部分更新負荷と画像再取得
+  頻度を抑えた。
+
+安全・インターフェースへの影響:
+
+- 安全 Release 判定そのものは Arduino Uno Q 側のまま変更なし。
+- Raspberry Pi 側ダッシュボードはあくまで監視・演示層であり、
+  RELEASE_ON/OFF の主安全判定を Pi に移動させる変更ではない。
+- Demo Mode のAPI・シリアルコマンド・コマンドログ仕様は不変。
+  HTML form は引き続き同じ action/parameter で POST する。
+
+検証:
+
+- `.venv/bin/python -m py_compile raspberry_pi/dashboard/app.py` → OK
+- `.venv/bin/python -m pytest tests/test_dashboard.py -q` → 12/12 passed
+
+結果:
+
+- 12 個のダッシュボードテストが全て成功。既存の表示前提文字列や
+  フレーム取得・Demo API 挙動は保たれた。
+- 未コミット変更として記録。ファイルシステム更新日時ベース。
+
+残課題:
+
+- 実機ブラウザでのチラつき解消を操作者目線で最終確認すること。
+- 画像は依然として部分更新のたびに `?t=<ns>` のみ置換され、
+  Camera AI 書き出し頻度に応じて再取得される。許容範囲だが、
+  カメラFPSが上がった場合は画像専用の低頻度更新切り分けを検討する。
+
+### 2026-07-06T09:37:47+09:00 — GODAアクチュエータのULN2003ステッパーモード追加
+
+担当: Codex
+
+目的:
+
+- `Haruka GODA/beehivemotorC++/beehivemotorC++.ino` で、既存の
+  PCA9685サーボ駆動に加えて、ULN2003経由のステッピングモータ駆動を
+  選択できるようにする。
+
+変更ファイル:
+
+- `Haruka GODA/beehivemotorC++/beehivemotorC++.ino`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- `ACTIVE_MOTOR_MODE` を追加し、
+  `MOTOR_MODE_ULN2003_STEPPER` と `MOTOR_MODE_PCA9685_SERVO` を
+  コンパイル時に切り替えられる構成にした。
+- 既定モードを `MOTOR_MODE_ULN2003_STEPPER` に設定した。
+- ULN2003ステッパーモードに、D8-D11をIN1-IN4として使う半ステップ駆動、
+  開位置 `1024` half-steps、閉位置 `0` へのボタン切替動作を追加した。
+- ステッパー移動後は既定でコイルをOFFにし、待機時の発熱を抑える設定にした。
+- PCA9685サーボ側の初期化・0/90度切替動作を同じボタン操作APIに整理し、
+  既存モードとして残した。
+
+安全・インターフェースへの影響:
+
+- このスケッチは単体アクチュエータ確認用であり、メインの
+  Front Paw Contact Pad安全状態機械やUno QのRELEASE_ON/OFF判断は変更なし。
+- ULN2003モードでは起動時の現在位置を閉/originとして扱うため、実機では
+  電源投入前に機構位置を合わせる必要がある。
+- 待機時はステッパーコイルをOFFにするため発熱は抑えられるが、保持トルクは
+  失われる。必要な場合のみ `releaseStepperCoilsAfterMove` を調整する。
+
+検証:
+
+- `arduino-cli compile --fqbn arduino:avr:uno --build-path
+  /tmp/codex-beehivemotor-uln2003-build 'Haruka GODA/beehivemotorC++'`
+  → 成功。3712 bytes flash、584 bytes RAM。
+- `arduino-cli compile --fqbn arduino:avr:uno --build-path
+  /tmp/codex-beehivemotor-servo-build --build-property
+  compiler.cpp.extra_flags=-DACTIVE_MOTOR_MODE=1
+  'Haruka GODA/beehivemotorC++'`
+  → 成功。8592 bytes flash、742 bytes RAM。
+
+結果:
+
+- ULN2003ステッパーモードを既定としてUno向けにコンパイル可能になった。
+- PCA9685サーボモードもコマンドライン切替でコンパイル可能なまま維持した。
+- 未コミット変更として記録。ファイルシステム編集時刻ベース。
+
+残課題:
+
+- 実機でULN2003 IN1-D8 / IN2-D9 / IN3-D10 / IN4-D11、5V、GND共通の
+  配線を確認し、回転方向と開閉量を調整する。
+- 実機機構に合わせて `stepperOpenSteps` と `stepperStepDelayUs` を調整する。
+
+### 2026-07-06T09:45:00+09:00 — Camera AIのNCNN segfault回避とカメラのみフェイルセーフモード追加
+
+担当: AI assistant
+
+目的:
+
+- `./scripts/run_demo.sh` 起動後、カメラ画面が数秒で固まる問題を解消。
+  原因は Camera AI が `ex.extract("out0")` で SIGSEGV(終了コード139) し、
+  `run_camera_ai` プロセスが即死して最新フレーム更新が止まっていたため。
+  gdb/faqulthandler で `ncnn.cpython-313-aarch64-linux-gnu.so` 内の
+  再帰的スタックで segfault することを確認（入力256x256/3ch正常）。
+
+変更ファイル:
+
+- `raspberry_pi/camera_ai/run_camera_ai.py`
+- `scripts/run_demo.sh`
+
+変更内容:
+
+- `run_camera_ai.py` に `--no-inference` オプションを追加。
+  推論をスキップし、カメラ撮像・debug frame書き出し・CSV/JSONL/
+  terminal status 出力だけを継続するフェイルセーフループ
+  (`run_camera_only_failsafe_loop`) を実装。状態は `ai_model_ok=false
+  / ai_bear_approaching=false / event=AI_INFERENCE_DISABLED` で常に HOLD。
+- `--once`/`--max-iterations` の停止条件をフェイルセーフループにも適用。
+- `scripts/run_demo.sh` に環境変数 `RUN_CAMERA_AI_INFERENCE` を追加。
+  既定は `0`（推論無効＝カメラのみフェイルセーフ）。NCNNが正常動作する
+  環境では `RUN_CAMERA_AI_INFERENCE=1` で元の推論パスに戻る。
+
+安全・インターフェースへの影響:
+
+- Release 主安全判定は Arduino Uno Q 側のまま変更なし。
+- Raspberry Pi 側 Camera AI は監視・演示層であり、これ単独で
+  RELEASE_ON を出さない設計は不変。
+- フェイルセーフモードでは `ai_bear_approaching=false` 固定のため、
+  safety_controller は熊なしと判定し HOLD を維持。安全側に倒れている。
+- Camera AI の JSON Lines / CSV フィールド形式は同一。
+  `ai_model_ok=false` と `event=AI_INFERENCE_DISABLED` が新たに出る。
+
+検証:
+
+- `python -m py_compile raspberry_pi/camera_ai/run_camera_ai.py` → OK
+- `python -m raspberry_pi.camera_ai.run_camera_ai ... --once --no-inference`
+  → EXIT=0、フレーム更新確認（09:41:24）。
+- `RUN_SAFETY_CONTROL=0 RUN_DASHBOARD=0 RUN_CAMERA_AI_INFERENCE=0
+  timeout 12 ./scripts/run_demo.sh` → Camera AI が12秒間連続稼働、
+  状態行が1秒間隔で継続出力、フレーム更新継続。
+- `python -m pytest tests/test_camera_ai_approach_logic.py
+  tests/test_decision_logic.py` → 12/12 passed。
+
+結果:
+
+- Demo 起動時のカメラ画面固まりを解消。ダッシュボードは最新フレームを
+  更新し続けるようになった。熊検知は NCNN 復旧までオフ（HOLD継続）。
+- 未コミット変更として記録。ファイルシステム編集時刻ベース。
+
+残課題:
+
+- NCNN `1.0.20260526` の aarch64 ビルドと当該モデルの組合せで
+  `extract` が segfault する根本原因は未解明。別バージョンのncnn、
+  ultralytics `.pt` fallback、または ONNX/TFLite 経由で熊検知を
+  復旧させること。復旧後は `RUN_CAMERA_AI_INFERENCE=1` に戻す。
+
+### 2026-07-06T09:43:45+09:00 — GODAアクチュエータのL293Dステッパーモード切替
+
+担当: Codex
+
+目的:
+
+- 直前に追加したULN2003ステッパーモードをやめ、L293D経由の
+  ステッピングモータ駆動へ切り替える。
+
+変更ファイル:
+
+- `Haruka GODA/beehivemotorC++/beehivemotorC++.ino`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- `MOTOR_MODE_ULN2003_STEPPER` を `MOTOR_MODE_L293D_STEPPER` に置換し、
+  既定モードをL293Dステッパーにした。
+- L293D配線想定を、Enable A=D5、IN1=D8、IN2=D9、Enable B=D6、
+  IN3=D10、IN4=D11としてコードとシリアル表示に反映した。
+- 4-wire bipolar stepper向けに2相励磁の4ステップシーケンスへ変更した。
+- 移動時はEnable A/BをHIGH、移動後は既定でEnable A/Bと入力をLOWにし、
+  待機時の発熱と通電を抑える構成にした。
+- PCA9685サーボモードは `ACTIVE_MOTOR_MODE=1` でコンパイル可能なまま維持した。
+
+安全・インターフェースへの影響:
+
+- この変更は単体アクチュエータ確認用スケッチのみで、メインの
+  Front Paw Contact Pad安全状態機械やUno QのRELEASE_ON/OFF判断は変更なし。
+- L293DのVCC2はモータ用電源を使い、ArduinoとはGND共通にする必要がある。
+- 起動時の現在位置を閉/originとして扱うため、実機では電源投入前に
+  機構位置を合わせる必要がある。
+- `stepperOpenSteps` は一般的な1.8度ステッパーの約90度として50 stepsにしたが、
+  実機のギア比・機構に合わせて調整が必要。
+
+検証:
+
+- `arduino-cli compile --fqbn arduino:avr:uno --build-path
+  /tmp/codex-beehivemotor-l293d-build 'Haruka GODA/beehivemotorC++'`
+  → 成功。3762 bytes flash、576 bytes RAM。
+- `arduino-cli compile --fqbn arduino:avr:uno --build-path
+  /tmp/codex-beehivemotor-servo-build --build-property
+  compiler.cpp.extra_flags=-DACTIVE_MOTOR_MODE=1
+  'Haruka GODA/beehivemotorC++'`
+  → 成功。8592 bytes flash、742 bytes RAM。
+
+結果:
+
+- L293Dステッパーモードを既定としてUno向けにコンパイル可能になった。
+- コード中のULN2003前提のモード名・配線表示・半ステップシーケンスを
+  L293D前提に置き換えた。
+- 未コミット変更として記録。ファイルシステム編集時刻ベース。
+
+残課題:
+
+- 実機でL293D Enable/Input配線、VCC2モータ電源、GND共通を確認する。
+- モータの回転方向が逆の場合はコイル配線またはシーケンス順を調整する。
+- 実機機構に合わせて `stepperOpenSteps` と `stepperStepDelayMs` を調整する。
+
+### 2026-07-06T10:30:00+09:00 — ONNX/cv2.dnn推論経路追加とNCNN segfault恒久復旧準備
+
+担当: AI assistant
+
+目的:
+
+- 前回の一時対応(--no-inference)では `ai_model_ok=false` のままになり、
+  熊検知が完全に無効化されていた。NCNN 1.0.20260526 の aarch64 ビルドが
+  `extract("out0")` で SIGSEGV する問題を、Pi 上の PyTorch インストール無しで
+  恒久復旧するため、ONNX + OpenCV `cv2.dnn` 推論経路を追加し、Colab で
+  `.pt` -> ONNX を書き出す運用に切り替える。
+
+変更ファイル:
+
+- `raspberry_pi/camera_ai/bear_detector.py`
+- `raspberry_pi/camera_ai/run_camera_ai.py`
+- `scripts/run_demo.sh`
+- `notebooks/export_bear_yolo_onnx.ipynb` (新規)
+- `tests/test_camera_ai_model_selection.py`
+- `README.md`, `README.ja.md`, `README.zh-CN.md`, `README.ko.md`
+- `raspberry_pi/dashboard/app.py` (motor_driver import のみ別件修正)
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- `bear_detector.py` に ONNX/cv2.dnn バックエンド(`_init_onnx` /
+  `_detect_onnx`)を追加。`.onnx` ファイルを検出すると自動的にこの経路を使う。
+  YOLOv8 ONNX 出力レイアウト `[1, 4+nc, anchors]` に合わせ、objectness なしの
+  class_scores最大値を conf とする解析に修正。
+- `run_camera_ai.py` の `resolve_model_candidates` を変更し、
+  既存候補の中で ONNX ファイルを NCNN ディレクトリより優先するようソート。
+  単一の `models/yolo_bear.onnx` を置くだけで cv2.dnn 経路に自動切替。
+- `scripts/run_demo.sh` の `RUN_CAMERA_AI_INFERENCE` 既定値を
+  「`models/yolo_bear.onnx` があれば 1、なければ 0」の自動判定に変更。
+  ONNX 未配置時は従来通りカメラのみフェイルセーフで画面更新を維持。
+- `notebooks/export_bear_yolo_onnx.ipynb` を新規追加。Colab 上で
+  `best.pt` を読み込み、`imgsz=256, opset=12, simplify=True, dynamic=False`
+  で ONNX を書き出し、`yolo_bear.onnx` としてダウンロードする手順をまとめた。
+- 各言語 README に「NCNN が segfault する環境では Colab で ONNX を書き出し
+  `models/yolo_bear.onnx` を配置すると自動で cv2.dnn 推論に切り替わる」手順を追記。
+- `tests/test_camera_ai_model_selection.py` に
+  `test_resolve_model_candidates_prefers_onnx_over_ncnn` を追加。
+- `raspberry_pi/dashboard/app.py` の `from motor_driver import ...` を
+  パッケージ相対 import に修正し、テスト収集時の ModuleNotFoundError を解消。
+
+安全・インターフェースへの影響:
+
+- Release 主安全判定は Arduino Uno Q 側のまま変更なし。
+- Camera AI は監視・演示層であり、これ単独で RELEASE_ON を出さない設計は不変。
+- ONNX 推理が有効な場合のみ `ai_model_ok=true` になる。モデル未配置時は
+  引き続き `ai_model_ok=false` で HOLD を維持(安全側)。
+- Camera AI の JSON Lines / CSV フィールド形式は同一。
+
+検証:
+
+- `python -m py_compile bear_detector.py run_camera_ai.py` → OK
+- `bash -n scripts/run_demo.sh` → OK
+- `pytest tests/test_camera_ai_model_selection.py
+  tests/test_camera_ai_approach_logic.py tests/test_decision_logic.py
+  tests/test_dashboard.py` → 32 passed, 1 preexisting failure
+  (test_ncnn_model_without_runtime_fails_before_ultralytics_load は
+   今回より前から存在する stale テストで `_check_runtime_dependency`
+   メソッドが存在しない。今回のスコープ外。)
+- ONNX 未配置時の `timeout 6 ./scripts/run_demo.sh` → カメラのみ
+  フェイルセーフで起動し画面更新継続(従来同等)。
+
+結果:
+
+- Colab で `yolo_bear.onnx` を作成し `models/yolo_bear.onnx` に配置すれば、
+  Pi 側に PyTorch/ultralytics/NCNN を新規インストールせずに
+  `ai_model_ok=true` の推論復旧が可能になった。
+- 未コミット変更として記録。ファイルシステム編集時刻ベース。
+
+残課題:
+
+- ユーザーが Colab(`notebooks/export_bear_yolo_onnx.ipynb`)で
+  `yolo_bear.onnx` を生成し、`models/yolo_bear.onnx` に配置すること。
+  配置後 `./scripts/run_demo.sh` を再起動し、`ai_model_ok=true` と
+  画面更新を確認する。
+- `_detect_onnx` は NMS を持たない簡易パース。熊単一クラス想定で
+  ハッカソン演示には十分だが、誤検出が多い場合は NMS を追加すること。
+- 既存の stale テスト `test_ncnn_model_without_runtime_fails_before_ultralytics_load`
+  を別途 `_init_ncnn` の RuntimeError 期待に更新すること。

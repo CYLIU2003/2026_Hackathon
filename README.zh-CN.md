@@ -402,6 +402,27 @@ Dashboard process
 `models/yolo_bear_ncnn_model` 后，启动和推理都可以通过。因此 Pi 演示时应把
 NCNN模型作为正常运行路径。
 
+如果当前 Pi 环境的 `ncnn` 运行时（例如 `ncnn==1.0.20260526` 的 aarch64 构建）
+在 `extract("out0")` 时发生 SIGSEGV，Camera AI 会立刻崩溃，画面会停在最后一帧。
+此时无需在 Pi 上安装 PyTorch，只要用 Colab 把 `.pt` 导出为 ONNX 并放置
+`models/yolo_bear.onnx`，Camera AI 会自动优先使用
+ONNX + OpenCV `cv2.dnn` 推理路径（无需 NCNN/Pi 上无需安装 PyTorch）。
+
+ONNX 导出流程（在 Colab 上执行，不在 Pi 上安装任何东西）：
+
+```text
+1. 打开 notebooks/export_bear_yolo_onnx.ipynb
+2. 上传仓库的 best.pt
+3. 运行全部 cell，导出 models/yolo_bear.onnx（imgsz=256, opset=12, simplify）
+4. 下载 yolo_bear.onnx，放置到 Pi 的 models/yolo_bear.onnx
+5. 在 Pi 上重新运行 ./scripts/run_demo.sh
+6. 确认 ai_model_ok=true 且画面持续更新
+```
+
+当 `models/yolo_bear.onnx` 存在时，`scripts/run_demo.sh` 默认会启用推理
+（`RUN_CAMERA_AI_INFERENCE` 自动为 1）。没有 ONNX 时默认进入相机仅
+故障安全模式（`ai_model_ok=false`、保持 HOLD、画面仍持续更新）。
+
 Camera AI 运行命令：
 
 ```bash

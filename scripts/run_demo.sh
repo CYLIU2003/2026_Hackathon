@@ -15,6 +15,18 @@ RUN_DASHBOARD="${RUN_DASHBOARD:-1}"
 MOCK_CONTACT="${MOCK_CONTACT:-1}"
 MOCK_IMPEDANCE_KOHM="${MOCK_IMPEDANCE_KOHM:-92.4}"
 HONEY_AMOUNT_PERCENT="${HONEY_AMOUNT_PERCENT:-80}"
+# Camera AI 推論 on/off。1=推論あり、0=カメラのみフェイルセーフ(HOLD)。
+# 既定は「配置されている推論モデルに応じた自動判定」:
+#  - models/yolo_bear.onnx があれば ONNX/cv2.dnn 推理が安定するので 1
+#  - なければ NCNN が segfault する環境を想定し 0（カメラのみ）
+# 明示的に切替えたい場合は RUN_CAMERA_AI_INFERENCE=1 / 0 を設定すること。
+if [[ -z "${RUN_CAMERA_AI_INFERENCE:-}" ]]; then
+  if [[ -f models/yolo_bear.onnx ]]; then
+    RUN_CAMERA_AI_INFERENCE=1
+  else
+    RUN_CAMERA_AI_INFERENCE=0
+  fi
+fi
 if [[ -z "${PYTHON_BIN:-}" && -x ".venv/bin/python" ]]; then
   PYTHON_BIN=".venv/bin/python"
 else
@@ -45,11 +57,17 @@ trap stop_demo INT TERM
 
 if [[ "${RUN_CAMERA_AI}" == "1" ]]; then
   echo "Starting Camera AI on ${CAMERA_DEVICE}..."
+  camera_ai_inference_args=()
+  if [[ "${RUN_CAMERA_AI_INFERENCE}" != "1" ]]; then
+    echo "  (inference disabled: camera-only fail-safe mode)"
+    camera_ai_inference_args+=(--no-inference)
+  fi
   "${PYTHON_BIN}" -m raspberry_pi.camera_ai.run_camera_ai \
     --device "${CAMERA_DEVICE}" \
     --terminal-status \
     --no-jsonl \
     --save-debug-frames \
+    "${camera_ai_inference_args[@]}" \
     >> "${LOG_DIR}/camera_ai.status.log" 2>&1 &
   child_pids+=("$!")
 fi

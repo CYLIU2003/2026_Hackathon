@@ -1,0 +1,23 @@
+{
+  "motor_mode": "SIMULATION",
+  "pca9685_i2c_address": 112,
+  "pca9685_i2c_bus": 1,
+  "pca9685_servo_channel": 0,
+  "pca9685_servo_min_pulse": 150,
+  "pca9685_servo_max_pulse": 500,
+  "pca9685_servo_closed_angle": 0,
+  "pca9685_servo_open_angle": 90,
+  "pca9685_servo_step_deg": 10,
+  "pca9685_servo_step_delay_ms": 30,
+  "l293d_enable_pin_a": 5,
+  "l293d_input_pin_1": 8,
+  "l293d_input_pin_2": 9,
+  "l293d_enable_pin_b": 6,
+  "l293d_input_pin_3": 10,
+  "l293d_input_pin_4": 11,
+  "l293d_stepper_open_steps": 50,
+  "l293d_stepper_step_delay_ms": 5,
+  "l293d_release_coils_after_move": true,
+  "max_operation_duration_ms": 5000,
+  "cooldown_after_operation_ms": 2000
+}

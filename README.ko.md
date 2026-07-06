@@ -402,6 +402,30 @@ Raspberry Pi bring-up 확인 중 `.pt` PyTorch fallback 은 `YOLO.predict()` 실
 `models/yolo_bear_ncnn_model` 을 사용하는 경로에서는 시작과 추론이 통과했으므로,
 Pi 데모에서는 NCNN 모델을 일반 실행 경로로 사용한다.
 
+현재 Pi 환경의 `ncnn` 런타임(예: `ncnn==1.0.20260526` aarch64 빌드)이
+`extract("out0")` 에서 SIGSEGV 하여 Camera AI 가 즉시 죽고 화면이 마지막
+프레임에 멈추는 경우, Pi 에 PyTorch 를 설치하지 않고 Colab 에서 `.pt` 를
+ONNX 로 내보내 `models/yolo_bear.onnx` 만 올려두면 Camera AI 는 자동으로
+ONNX + OpenCV `cv2.dnn` 추론 경로를 우선 사용한다(NCNN 불필요 / Pi 측
+PyTorch 설치 불필요).
+
+ONNX 내보내기 절차(Colab 에서 실행, Pi 에는 아무것도 설치하지 않음):
+
+```text
+1. notebooks/export_bear_yolo_onnx.ipynb 를 연다
+2. 저장소의 best.pt 를 업로드
+3. 모든 셀을 실행해 models/yolo_bear.onnx 를 내보낸다
+   (imgsz=256, opset=12, simplify)
+4. yolo_bear.onnx 를 다운로드해 Pi 의 models/yolo_bear.onnx 에 배치
+5. Pi 에서 ./scripts/run_demo.sh 를 다시 실행
+6. ai_model_ok=true 이고 화면이 계속 갱신되는지 확인
+```
+
+`models/yolo_bear.onnx` 가 존재하면 `scripts/run_demo.sh` 는 기본적으로
+추론을 활성화한다(`RUN_CAMERA_AI_INFERENCE` 가 자동으로 1). ONNX 가 없으면
+기본값은 카메라 전용 페일세이프 모드(`ai_model_ok=false`・HOLD 유지・
+화면은 계속 갱신)이다.
+
 Camera AI 실행 명령:
 
 ```bash

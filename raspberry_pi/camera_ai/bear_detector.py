@@ -47,6 +47,8 @@ class YoloBearDetector:
 
         if self._is_ncnn_model(self.model_path):
             self._init_ncnn()
+        elif self._is_onnx_model(self.model_path):
+            self._init_onnx()
         else:
             self._init_ultralytics(enable_model_fusion)
 
@@ -61,6 +63,8 @@ class YoloBearDetector:
         """
         if self._backend == "ncnn":
             return self._detect_ncnn(frame)
+        if self._backend == "onnx":
+            return self._detect_onnx(frame)
         return self._detect_ultralytics(frame)
 
     # ------------------------------------------------------------------
@@ -71,6 +75,10 @@ class YoloBearDetector:
     def _is_ncnn_model(model_path: str) -> bool:
         p = Path(model_path)
         return p.is_dir() and any(p.glob("*.ncnn.param"))
+
+    @staticmethod
+    def _is_onnx_model(model_path: str) -> bool:
+        return Path(model_path).suffix.lower() == ".onnx" and Path(model_path).is_file()
 
     # ------------------------------------------------------------------
     # NCNN backend
@@ -92,6 +100,27 @@ class YoloBearDetector:
             raise RuntimeError(f"NCNN model files missing in {self.model_path}")
 
         self._ncnn_net = ncnn.Net()
+        # Pi/aarch64 で segfault しにくいよう、軽量な設定を明示。
+        # 利用可能な setter だけを try で包み、存在しなくても継続する。
+        for option_name, args in (
+            ("set_num_threads", (1,)),
+            ("set_light_mode", (True,)),
+            ("set_fp16_packed", (False,)),
+            ("set_fp16_storage", (False,)),
+            ("set_fp16_arithmetic", (False,)),
+            ("set_bf16s_packed", (False,)),
+            ("set_bf16s_storage", (False,)),
+            ("set_bf16s_arithmetic", (False,)),
+            ("set_use_packing_layout", (0,)),
+            ("set_vulkan_compute", (False,)),
+        ):
+            setter = getattr(self._ncnn_net, option_name, None)
+            if setter is None:
+                continue
+            try:
+                setter(*args)
+            except Exception:
+                pass
         ret = self._ncnn_net.load_param(str(param_files[0]))
         if ret != 0:
             raise RuntimeError(f"Failed to load NCNN param: {param_files[0]}")
@@ -187,6 +216,98 @@ class YoloBearDetector:
             meta = yaml.safe_load(f) or {}
         names = meta.get("names", {0: "bear"})
         return {int(k): str(v) for k, v in names.items()}
+
+    # ------------------------------------------------------------------
+    # ONNX (cv2.dnn) backend — no PyTorch / ultralytics required
+    # ------------------------------------------------------------------
+
+    def _init_onnx(self) -> None:
+        try:
+            import cv2
+        except ImportError as exc:
+            raise RuntimeError(
+                "OpenCV (cv2) is not installed. Install opencv-python to use the ONNX backend."
+            ) from exc
+
+        self._cv2 = cv2
+        self._onnx_net = cv2.dnn.readNetFromONNX(self.model_path)
+        # Prefer CPU backend for stability on Raspberry Pi.
+        try:
+            self._onnx_net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+            self._onnx_net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        except Exception:
+            pass
+
+        # Load class names from sibling metadata.yaml if present.
+        model_file = Path(self.model_path)
+        metadata_path = model_file.parent / "metadata.yaml"
+        if metadata_path.exists():
+            self._class_names = self._load_metadata_class_names(metadata_path)
+        else:
+            self._class_names = {0: "bear"}
+
+        self._backend = "onnx"
+
+    def _detect_onnx(self, frame: Any) -> list[dict]:
+        cv2 = self._cv2
+        frame_height, frame_width = frame.shape[:2]
+        frame_area = max(1, int(frame_width) * int(frame_height))
+
+        # Preprocess: letterbox-free simple resize + normalize (0..1).
+        blob = cv2.dnn.blobFromImage(
+            frame,
+            scalefactor=1.0 / 255.0,
+            size=(self.input_size, self.input_size),
+            mean=(0.0, 0.0, 0.0),
+            swapRB=True,
+            crop=False,
+        )
+        self._onnx_net.setInput(blob)
+        out = self._onnx_net.forward()
+
+        # Ultralytics YOLOv8 ONNX output layout: [1, 4+nc, num_anchors] with
+        # rows [cx, cy, w, h, cls0_score, cls1_score, ...] and NO objectness.
+        # Rearrange to (num_anchors, 4+nc).
+        if out.ndim == 3:
+            out = out[0]
+        if out.shape[0] < out.shape[-1]:
+            out = out.T
+        detections: list[dict] = []
+        scale_x = frame_width / self.input_size
+        scale_y = frame_height / self.input_size
+        for row in out:
+            if row.shape[0] < 5:
+                continue
+            class_scores = row[4:]
+            class_index = int(np.argmax(class_scores))
+            conf = float(class_scores[class_index])
+            if conf < self.confidence_floor:
+                continue
+            if self.class_ids and class_index not in self.class_ids:
+                continue
+            cx, cy, bw, bh = [float(v) for v in row[:4]]
+            # Coordinates are in input_size space; rescale to frame size.
+            scale_x = frame_width / self.input_size
+            scale_y = frame_height / self.input_size
+            x1 = max(0.0, (cx - bw / 2.0) * scale_x)
+            y1 = max(0.0, (cy - bh / 2.0) * scale_y)
+            x2 = min(float(frame_width), (cx + bw / 2.0) * scale_x)
+            y2 = min(float(frame_height), (cy + bh / 2.0) * scale_y)
+            box_area_ratio = self._box_area_ratio([x1, y1, x2, y2], frame_area)
+            class_name = self._class_names.get(class_index, str(class_index)).lower()
+            detections.append(
+                {
+                    "class_name": class_name,
+                    "confidence": conf,
+                    "bbox_xyxy": [x1, y1, x2, y2],
+                    "box_area_ratio": box_area_ratio,
+                }
+            )
+        return sorted(
+            detections,
+            key=lambda detection: float(detection["confidence"]),
+            reverse=True,
+        )
 
     # ------------------------------------------------------------------
     # Ultralytics (PyTorch) fallback backend

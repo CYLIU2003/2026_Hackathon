@@ -71,6 +71,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable annotated camera frame output even if enabled in config.",
     )
+    parser.add_argument(
+        "--no-inference",
+        action="store_true",
+        help=(
+            "Skip YOLO inference and run in camera-only fail-safe mode. "
+            "Outputs ai_model_ok=false and ai_bear_approaching=false while still "
+            "capturing frames and writing CSV/JSONL/terminal status. Useful when "
+            "the NCNN native library segfaults on the current platform."
+        ),
+    )
     return parser
 
 
@@ -130,7 +140,17 @@ def resolve_model_candidates(
         candidate_path for candidate_path in resolved_candidates if candidate_path.exists()
     ]
     if existing_candidates:
-        return existing_candidates
+        # Prefer ONNX files over NCNN directories on platforms where the NCNN
+        # native runtime segfaults. This lets a single dropped-in yolo_bear.onnx
+        # switch the system to the cv2.dnn ONNX backend automatically.
+        def _priority(path: Path) -> int:
+            if path.suffix.lower() == ".onnx":
+                return 0
+            if path.is_dir() and any(path.glob("*.ncnn.param")):
+                return 1
+            return 2
+
+        return sorted(existing_candidates, key=_priority)
     return [resolved_candidates[0]]
 
 
@@ -354,6 +374,116 @@ def run_detection(detector: YoloBearDetector, frame) -> tuple[list[dict], float]
     return detections, inference_time_ms
 
 
+def run_camera_only_failsafe_loop(
+    *,
+    args,
+    publisher: AiStatePublisher,
+    capture,
+    camera_device: str,
+    save_frames: bool,
+    debug_frame_dir: Path,
+    latest_frame_name: str,
+    debug_frame_interval_sec: float,
+    output_config: dict,
+) -> int:
+    """Camera-only fail-safe loop used when inference is disabled or unsafe.
+
+    Emits ai_model_ok=false and ai_bear_approaching=false on every cycle,
+    keeps writing the latest camera frame, and never touches the YOLO model.
+    This keeps the dashboard visually live while remaining in safe HOLD.
+    """
+    failsafe_state = AiState(
+        camera_device=camera_device,
+        ai_camera_ok=True,
+        ai_model_ok=False,
+        ai_bear_detected=False,
+        ai_bear_confidence=None,
+        ai_bear_box_area_ratio=None,
+        ai_bear_approaching=False,
+        event="AI_INFERENCE_DISABLED",
+        inference_time_ms=None,
+    )
+    failsafe_record = failsafe_state.to_record()
+    publish_state(publisher, failsafe_state, terminal_status=args.terminal_status)
+    last_record = failsafe_record
+    last_debug_frame_saved_at = 0.0
+    iteration_count = 0
+    try:
+        while True:
+            ok, frame = read_frame_with_retries(capture)
+            if not ok or frame is None:
+                publish_state(
+                    publisher,
+                    build_fail_safe_state(
+                        camera_device=camera_device,
+                        ai_camera_ok=False,
+                        ai_model_ok=False,
+                        event="AI_CAMERA_FRAME_ERROR",
+                    ),
+                    terminal_status=args.terminal_status,
+                )
+                return 1
+
+            now_monotonic = time.monotonic()
+            should_save_debug_frame = (
+                save_frames
+                and now_monotonic - last_debug_frame_saved_at >= debug_frame_interval_sec
+            )
+            if should_save_debug_frame:
+                save_debug_frame(
+                    frame,
+                    [],
+                    last_record,
+                    debug_frame_dir=debug_frame_dir,
+                    latest_frame_name=latest_frame_name,
+                )
+                last_debug_frame_saved_at = now_monotonic
+
+            last_record = publish_state(
+                publisher,
+                AiState(
+                    camera_device=camera_device,
+                    ai_camera_ok=True,
+                    ai_model_ok=False,
+                    ai_bear_detected=False,
+                    ai_bear_confidence=None,
+                    ai_bear_box_area_ratio=None,
+                    ai_bear_approaching=False,
+                    event="AI_INFERENCE_DISABLED",
+                    inference_time_ms=None,
+                ),
+                terminal_status=args.terminal_status,
+            )
+            iteration_count += 1
+
+            if use_display_active(output_config):
+                import cv2
+
+                cv2.imshow("camera_ai", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+
+            if args.once or (
+                args.max_iterations is not None
+                and iteration_count >= args.max_iterations
+            ):
+                break
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        capture.release()
+        if use_display_active(output_config):
+            import cv2
+
+            cv2.destroyAllWindows()
+    return 0
+
+
+def use_display_active(output_config: dict) -> bool:
+    return bool(output_config.get("use_display", False))
+
+
 def main() -> int:
     args = build_parser().parse_args()
     try:
@@ -434,6 +564,25 @@ def main() -> int:
                 debug_frame_dir=debug_frame_dir,
                 latest_frame_name=latest_frame_name,
             )
+
+    if args.no_inference:
+        if args.terminal_status:
+            print(
+                "inference=disabled (camera-only fail-safe mode)",
+                file=sys.stderr,
+                flush=True,
+            )
+        return run_camera_only_failsafe_loop(
+            args=args,
+            publisher=publisher,
+            capture=capture,
+            camera_device=camera_device,
+            save_frames=save_frames,
+            debug_frame_dir=debug_frame_dir,
+            latest_frame_name=latest_frame_name,
+            debug_frame_interval_sec=debug_frame_interval_sec,
+            output_config=output_config,
+        )
 
     inference_config = config.get("inference", {})
     try:

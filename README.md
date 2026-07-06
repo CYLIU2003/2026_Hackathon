@@ -423,6 +423,29 @@ During bring-up on the Raspberry Pi, the `.pt` PyTorch fallback hit an
 `models/yolo_bear_ncnn_model` fixed the startup path, so the Pi demo should use
 the NCNN model as the normal runtime.
 
+If the current Pi `ncnn` runtime (for example the `ncnn==1.0.20260526`
+aarch64 build) segfaults inside `extract("out0")`, Camera AI dies immediately
+and the dashboard picture freezes on the last frame. You do **not** need to
+install PyTorch on the Pi: export `.pt` to ONNX in Colab and drop
+`models/yolo_bear.onnx` on the Pi. Camera AI then automatically prefers the
+ONNX + OpenCV `cv2.dnn` inference path (no NCNN, no Pi-side PyTorch install).
+
+ONNX export flow (run in Colab; install nothing on the Pi):
+
+```text
+1. Open notebooks/export_bear_yolo_onnx.ipynb
+2. Upload the repo's best.pt
+3. Run all cells to export models/yolo_bear.onnx (imgsz=256, opset=12, simplify)
+4. Download yolo_bear.onnx and place it at models/yolo_bear.onnx on the Pi
+5. Re-run ./scripts/run_demo.sh on the Pi
+6. Confirm ai_model_ok=true and that the picture keeps updating
+```
+
+When `models/yolo_bear.onnx` exists, `scripts/run_demo.sh` enables inference
+by default (`RUN_CAMERA_AI_INFERENCE` becomes 1 automatically). Without ONNX,
+the default is the camera-only fail-safe mode (`ai_model_ok=false`, HOLD stays,
+picture still keeps updating).
+
 Lighten/export a nano `.pt` model for Raspberry Pi 4B:
 
 ```bash

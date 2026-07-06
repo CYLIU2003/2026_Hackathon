@@ -403,6 +403,30 @@ Raspberry Pi の立ち上げ確認では、`.pt` の PyTorch フォールバッ�
 `models/yolo_bear_ncnn_model` を使う経路では起動・推論が通ったため、Pi の
 デモでは NCNN モデルを通常の実行経路として使う。
 
+もし現在の Pi 環境の `ncnn` ランタイム（例: `ncnn==1.0.20260526` の aarch64
+ビルド）が `extract("out0")` で SIGSEGV し、Camera AI が即死して画面が最後の
+フレームで止まる場合は、Pi 側に PyTorch を入れずに Colab で `.pt` を ONNX に
+書き出し、`models/yolo_bear.onnx` を置くだけで Camera AI は自動的に
+ONNX + OpenCV `cv2.dnn` の推論経路を優先する（NCNN 不要 / Pi 上の PyTorch
+インストール不要）。
+
+ONNX 書き出し手順（Colab で実行し、Pi には何もインストールしない）:
+
+```text
+1. notebooks/export_bear_yolo_onnx.ipynb を開く
+2. リポジトリの best.pt をアップロード
+3. すべてのセルを実行し models/yolo_bear.onnx を書き出す
+   (imgsz=256, opset=12, simplify)
+4. yolo_bear.onnx をダウンロードし、Pi の models/yolo_bear.onnx に配置
+5. Pi で ./scripts/run_demo.sh を再起動
+6. ai_model_ok=true であり、画面が更新され続けることを確認
+```
+
+`models/yolo_bear.onnx` が存在するとき、`scripts/run_demo.sh` は既定で
+推論を有効にする（`RUN_CAMERA_AI_INFERENCE` が自動的に 1）。ONNX がないときは
+既定でカメラのみフェイルセーフモード（`ai_model_ok=false`・HOLD を維持・
+画面は更新され続ける）になる。
+
 Raspberry Pi 4B向けにnano `.pt` モデルを軽量形式へ書き出す:
 
 ```bash

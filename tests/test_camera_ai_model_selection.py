@@ -87,6 +87,30 @@ def test_resolve_model_candidates_keeps_existing_runtime_fallback_order(
     assert resolved == [lightweight_model_dir, fallback_model]
 
 
+def test_resolve_model_candidates_prefers_onnx_over_ncnn(tmp_path, monkeypatch):
+    """When both NCNN dir and ONNX file exist, ONNX is preferred.
+
+    This lets a dropped-in yolo_bear.onnx switch the system to the cv2.dnn
+    ONNX backend automatically on platforms where the NCNN runtime segfaults.
+    """
+    monkeypatch.setattr(run_camera_ai, "REPO_ROOT", tmp_path)
+    ncnn_model_dir = tmp_path / "models" / "yolo_bear_ncnn_model"
+    onnx_model = tmp_path / "models" / "yolo_bear.onnx"
+    ncnn_model_dir.mkdir(parents=True)
+    (ncnn_model_dir / "model.ncnn.param").write_text("placeholder", encoding="utf-8")
+    onnx_model.write_text("placeholder", encoding="utf-8")
+
+    resolved = run_camera_ai.resolve_model_candidates(
+        {
+            "model_path": "models/yolo_bear_ncnn_model",
+            "fallback_model_paths": ["models/yolo_bear.onnx"],
+        }
+    )
+
+    assert resolved[0] == onnx_model
+    assert ncnn_model_dir in resolved
+
+
 def test_load_detector_from_candidates_falls_back_after_runtime_load_error(
     tmp_path, monkeypatch
 ):

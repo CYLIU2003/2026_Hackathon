@@ -17,6 +17,11 @@ from flask import (
     url_for,
 )
 
+try:
+    from .motor_driver import DriverConfig, MotorDriverController
+except ImportError:
+    from motor_driver import DriverConfig, MotorDriverController
+
 
 JST = timezone(timedelta(hours=9))
 
@@ -48,7 +53,6 @@ HTML_TEMPLATE = """
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="refresh" content="{{ refresh_interval }}" />
     <title>Front Paw Contact Pad Dashboard</title>
     <style>
       :root {
@@ -137,6 +141,71 @@ HTML_TEMPLATE = """
         grid-column: 1 / -1;
         border-left: 6px solid var(--action);
       }
+      .connection {
+        grid-column: 1 / -1;
+        border-left: 6px solid #7c3aed;
+      }
+      .connection-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .connection-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+      .connection-card {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px;
+        background: #f9fafb;
+      }
+      .connection-card h3 {
+        margin: 0 0 8px;
+        font-size: 14px;
+        color: var(--muted);
+      }
+      .connection-card .value {
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .form-group {
+        margin-bottom: 12px;
+      }
+      .form-group label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+      .form-group input,
+      .form-group select {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 14px;
+      }
+      .form-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
+      }
+      .ok { color: var(--ok); }
+      .warn { color: var(--warn); }
+      .error { color: var(--error); }
+      .decision {
+        grid-column: 1 / -1;
+        border-left: 6px solid var(--ok);
+      }
+      .demo {
+        grid-column: 1 / -1;
+        border-left: 6px solid var(--action);
+      }
       .decision-grid {
         display: grid;
         grid-template-columns: repeat(3, minmax(150px, 1fr));
@@ -208,7 +277,10 @@ HTML_TEMPLATE = """
       <h1>Front Paw Contact Pad Dashboard</h1>
       <div class="muted">Remote monitor for Camera AI, contact-pad state, and fail-safe release status.</div>
     </header>
-    <main>
+    <main id="dashboard-main"
+          data-refresh-interval="{{ refresh_interval }}"
+          data-demo-enabled="{{ '1' if demo_status.get('demo_enabled') else '0' }}"
+          data-emergency-stop="{{ '1' if demo_status.get('emergency_stop') else '0' }}">
       <section class="decision">
         <h2>Feeding Safety Decision</h2>
         {% if row %}
@@ -266,7 +338,7 @@ HTML_TEMPLATE = """
             {% endif %}
             <span class="muted">Default command: STOP / closed</span>
           </div>
-          <form action="{{ url_for('demo_mode') }}" method="post">
+          <form action="{{ url_for('demo_mode') }}" method="post" data-demo-control>
             {% if demo_status.get('demo_enabled') %}
               <button class="button" type="submit" name="enabled" value="false">Disable Demo Mode</button>
             {% else %}
@@ -276,23 +348,23 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="demo-controls">
-          <form action="{{ url_for('demo_command') }}" method="post">
+          <form action="{{ url_for('demo_command') }}" method="post" data-demo-control>
             <input type="hidden" name="command" value="RELEASE" />
             <button class="button primary" type="submit" {% if not demo_status.get('demo_enabled') %}disabled{% endif %}>
               Release / Open
             </button>
           </form>
-          <form action="{{ url_for('demo_command') }}" method="post">
+          <form action="{{ url_for('demo_command') }}" method="post" data-demo-control>
             <input type="hidden" name="command" value="STOP" />
             <button class="button" type="submit">Stop / Close</button>
           </form>
-          <form action="{{ url_for('demo_command') }}" method="post">
+          <form action="{{ url_for('demo_command') }}" method="post" data-demo-control>
             <input type="hidden" name="command" value="TEST" />
             <button class="button" type="submit" {% if not demo_status.get('demo_enabled') %}disabled{% endif %}>
               Test Motion
             </button>
           </form>
-          <form action="{{ url_for('demo_command') }}" method="post">
+          <form action="{{ url_for('demo_command') }}" method="post" data-demo-control>
             <input type="hidden" name="command" value="EMERGENCY_STOP" />
             <button class="button danger" type="submit">Emergency Stop</button>
           </form>
@@ -307,6 +379,151 @@ HTML_TEMPLATE = """
         </table>
         <p class="muted">Demo command log: {{ demo_status.get('log_path', '') }}</p>
       </section>
+
+      <section class="connection">
+        <h2>Direct Motor Driver Portal</h2>
+        <div class="connection-header">
+          <div>
+            {% if motor_status.get('connected') %}
+              <span class="pill ok">CONNECTED</span>
+            {% elif motor_status.get('emergency_stop') %}
+              <span class="pill error">EMERGENCY STOP</span>
+            {% else %}
+              <span class="pill warn">DISCONNECTED</span>
+            {% endif %}
+            <span class="muted">Mode: {{ motor_status.get('motor_mode', 'SIMULATION') }}</span>
+          </div>
+          <div>
+            <form action="{{ url_for('motor_test') }}" method="post" style="display: inline;">
+              <button class="button" type="submit">Test Connection</button>
+            </form>
+            {% if motor_status.get('emergency_stop') %}
+              <form action="{{ url_for('motor_reset') }}" method="post" style="display: inline;">
+                <button class="button primary" type="submit">Reset</button>
+              </form>
+            {% else %}
+              <form action="{{ url_for('motor_emergency_stop') }}" method="post" style="display: inline;">
+                <button class="button danger" type="submit">Emergency Stop</button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="connection-grid">
+          <div class="connection-card">
+            <h3>Motor State</h3>
+            <div class="value">{{ motor_status.get('motor_state', 'CLOSED') }}</div>
+          </div>
+          <div class="connection-card">
+            <h3>Current Angle</h3>
+            <div class="value">{{ motor_status.get('current_angle', 0) }}°</div>
+          </div>
+          <div class="connection-card">
+            <h3>Operation Count</h3>
+            <div class="value">{{ motor_status.get('operation_count', 0) }}</div>
+          </div>
+          <div class="connection-card">
+            <h3>Last Operation</h3>
+            <div class="value">{{ motor_status.get('last_operation', '-') }}</div>
+            <div class="muted">{{ motor_status.get('last_operation_timestamp', '-') }}</div>
+          </div>
+        </div>
+
+        {% if motor_status.get('error_message') %}
+          <div style="background: #fee; border: 1px solid var(--error); border-radius: 6px; padding: 10px; margin-bottom: 16px;">
+            <strong class="error">Error:</strong> {{ motor_status.get('error_message') }}
+          </div>
+        {% endif %}
+
+        <div class="demo-controls">
+          <form action="{{ url_for('motor_open') }}" method="post">
+            <button class="button primary" type="submit" {% if motor_status.get('emergency_stop') %}disabled{% endif %}>
+              Open Motor
+            </button>
+          </form>
+          <form action="{{ url_for('motor_close') }}" method="post">
+            <button class="button" type="submit" {% if motor_status.get('emergency_stop') %}disabled{% endif %}>
+              Close Motor
+            </button>
+          </form>
+        </div>
+
+        <h3 style="margin-top: 20px;">Configuration</h3>
+        <form action="{{ url_for('motor_config') }}" method="post">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="motor_mode">Motor Mode</label>
+              <select id="motor_mode" name="motor_mode">
+                <option value="SIMULATION" {% if motor_config.get('motor_mode') == 'SIMULATION' %}selected{% endif %}>SIMULATION</option>
+                <option value="PCA9685_SERVO" {% if motor_config.get('motor_mode') == 'PCA9685_SERVO' %}selected{% endif %}>PCA9685_SERVO</option>
+                <option value="L293D_STEPPER" {% if motor_config.get('motor_mode') == 'L293D_STEPPER' %}selected{% endif %}>L293D_STEPPER</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="pca9685_i2c_address">PCA9685 I2C Address</label>
+              <input type="number" id="pca9685_i2c_address" name="pca9685_i2c_address" value="{{ motor_config.get('pca9685_i2c_address', 112) }}" />
+            </div>
+            <div class="form-group">
+              <label for="pca9685_i2c_bus">I2C Bus</label>
+              <input type="number" id="pca9685_i2c_bus" name="pca9685_i2c_bus" value="{{ motor_config.get('pca9685_i2c_bus', 1) }}" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="pca9685_servo_channel">Servo Channel</label>
+              <input type="number" id="pca9685_servo_channel" name="pca9685_servo_channel" value="{{ motor_config.get('pca9685_servo_channel', 0) }}" />
+            </div>
+            <div class="form-group">
+              <label for="pca9685_servo_open_angle">Open Angle (°)</label>
+              <input type="number" id="pca9685_servo_open_angle" name="pca9685_servo_open_angle" value="{{ motor_config.get('pca9685_servo_open_angle', 90) }}" />
+            </div>
+            <div class="form-group">
+              <label for="pca9685_servo_closed_angle">Closed Angle (°)</label>
+              <input type="number" id="pca9685_servo_closed_angle" name="pca9685_servo_closed_angle" value="{{ motor_config.get('pca9685_servo_closed_angle', 0) }}" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="l293d_stepper_open_steps">Stepper Open Steps</label>
+              <input type="number" id="l293d_stepper_open_steps" name="l293d_stepper_open_steps" value="{{ motor_config.get('l293d_stepper_open_steps', 50) }}" />
+            </div>
+            <div class="form-group">
+              <label for="l293d_stepper_step_delay_ms">Step Delay (ms)</label>
+              <input type="number" id="l293d_stepper_step_delay_ms" name="l293d_stepper_step_delay_ms" value="{{ motor_config.get('l293d_stepper_step_delay_ms', 5) }}" />
+            </div>
+            <div class="form-group">
+              <label for="l293d_release_coils_after_move">Release Coils After Move</label>
+              <select id="l293d_release_coils_after_move" name="l293d_release_coils_after_move">
+                <option value="true" {% if motor_config.get('l293d_release_coils_after_move') %}selected{% endif %}>Yes</option>
+                <option value="false" {% if not motor_config.get('l293d_release_coils_after_move') %}selected{% endif %}>No</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="max_operation_duration_ms">Max Operation Duration (ms)</label>
+              <input type="number" id="max_operation_duration_ms" name="max_operation_duration_ms" value="{{ motor_config.get('max_operation_duration_ms', 5000) }}" />
+            </div>
+            <div class="form-group">
+              <label for="cooldown_after_operation_ms">Cooldown After Operation (ms)</label>
+              <input type="number" id="cooldown_after_operation_ms" name="cooldown_after_operation_ms" value="{{ motor_config.get('cooldown_after_operation_ms', 2000) }}" />
+            </div>
+          </div>
+
+          <button class="button primary" type="submit">Save Configuration</button>
+        </form>
+
+        <h3 style="margin-top: 20px;">Hardware Status</h3>
+        <table>
+          <tr><th>I2C Available</th><td>{{ status_pill(motor_status.get('i2c_available'))|safe }}</td></tr>
+          <tr><th>GPIO Available</th><td>{{ status_pill(motor_status.get('gpio_available'))|safe }}</td></tr>
+          <tr><th>Driver Available</th><td>{{ status_pill(motor_status.get('driver_available'))|safe }}</td></tr>
+        </table>
+      </section>
+
 
       <section>
         <h2>Camera AI View</h2>
@@ -372,6 +589,111 @@ HTML_TEMPLATE = """
         <p class="muted">Contact log: {{ log_path }}</p>
       </section>
     </main>
+    <script>
+      (function () {
+        var main = document.getElementById("dashboard-main");
+        if (!main) { return; }
+        var refreshInterval = parseInt(
+          main.getAttribute("data-refresh-interval") || "2", 10
+        );
+        if (!isFinite(refreshInterval) || refreshInterval < 1) {
+          refreshInterval = 2;
+        }
+        var lastEstop = main.getAttribute("data-emergency-stop") === "1";
+        var fetching = false;
+
+        function refreshMain() {
+          if (fetching) { return; }
+          fetching = true;
+          fetch("/", { headers: { "X-Dashboard-Partial": "1" }, credentials: "same-origin" })
+            .then(function (response) {
+              if (!response.ok) { throw new Error("HTTP " + response.status); }
+              return response.text();
+            })
+            .then(function (html) {
+              var doc = new DOMParser().parseFromString(html, "text/html");
+              var newMain = doc.getElementById("dashboard-main");
+              if (newMain) {
+                main.innerHTML = newMain.innerHTML;
+                // Re-run inline scripts inside the fetched content.
+                newMain.querySelectorAll("script").forEach(function (oldScript) {
+                  var script = document.createElement("script");
+                  if (oldScript.src) {
+                    script.src = oldScript.src;
+                  } else {
+                    script.textContent = oldScript.textContent;
+                  }
+                  main.appendChild(script);
+                  script.remove();
+                });
+                var estop = main.getAttribute("data-emergency-stop") === "1";
+                lastEstop = estop;
+              }
+            })
+            .catch(function () { /* ignore transient fetch errors */ })
+            .finally(function () { fetching = false; });
+        }
+
+        function submitForm(form) {
+          var enabled = main.getAttribute("data-demo-enabled") === "1";
+          var estop = main.getAttribute("data-emergency-stop") === "1";
+          var inputs = form.querySelectorAll(
+            'input:not([type="submit"]):not([type="button"]):not([type="reset"])'
+          );
+          var hasRequireEnable = !!form.querySelector(
+            'input[name="command"][value="RELEASE"], input[name="command"][value="TEST"]'
+          );
+          if (hasRequireEnable && !enabled) {
+            return Promise.resolve(false);
+          }
+          var payload = new URLSearchParams();
+          inputs.forEach(function (input) {
+            if (input.name) { payload.append(input.name, input.value); }
+          });
+          return fetch(form.getAttribute("action") || form.action, {
+            method: form.method || "POST",
+            body: payload,
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" }
+          }).then(function () { return true; }).catch(function () { return false; });
+        }
+
+        function bindForms(root) {
+          var forms = root.querySelectorAll('form[data-demo-control]');
+          forms.forEach(function (form) {
+            form.addEventListener("submit", function (event) {
+              event.preventDefault();
+              var btn = form.querySelector('button[type="submit"]');
+              if (btn) { btn.disabled = true; }
+              submitForm(form).then(function () {
+                refreshMain();
+                setTimeout(function () {
+                  if (btn) { btn.disabled = false; }
+                }, 300);
+              });
+            });
+          });
+        }
+
+        document.addEventListener("submit", function (event) {
+          var form = event.target;
+          if (form && form.hasAttribute('data-demo-control')) {
+            event.preventDefault();
+            var btn = form.querySelector('button[type="submit"]');
+            if (btn) { btn.disabled = true; }
+            submitForm(form).then(function () {
+              refreshMain();
+              setTimeout(function () {
+                if (btn) { btn.disabled = false; }
+              }, 300);
+            });
+          }
+        });
+
+        bindForms(document);
+        setInterval(refreshMain, refreshInterval * 1000);
+      })();
+    </script>
   </body>
 </html>
 """
@@ -390,9 +712,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--demo-serial-timeout", type=float, default=1.0)
     parser.add_argument("--demo-serial-reset-delay", type=float, default=2.0)
     parser.add_argument("--demo-force-simulation", action="store_true")
+    parser.add_argument("--motor-driver-config", default="config.motor_driver.json")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--refresh", type=int, default=1)
+    parser.add_argument("--refresh", type=int, default=2)
     return parser.parse_args()
 
 
@@ -762,6 +1085,7 @@ def create_app(
     demo_serial_timeout: float = 1.0,
     demo_serial_reset_delay: float = 2.0,
     demo_force_simulation: bool = False,
+    motor_driver_config_file: str = "config.motor_driver.json",
     serial_client_factory: Callable[
         [str, int, float, float],
         object,
@@ -784,6 +1108,7 @@ def create_app(
         force_simulation=demo_force_simulation,
         serial_client_factory=serial_client_factory,
     )
+    motor_controller = MotorDriverController(Path(motor_driver_config_file))
 
     @app.route("/")
     def index():
@@ -802,6 +1127,8 @@ def create_app(
         row = load_latest_row(chosen_log) if chosen_log else None
         camera_row = load_latest_row(chosen_camera_log) if chosen_camera_log else None
         camera_frame_path = debug_frame_dir / camera_frame_file
+        motor_status = motor_controller.get_status()
+        motor_config = motor_controller.config.to_dict()
         return render_template_string(
             HTML_TEMPLATE,
             row=row,
@@ -813,6 +1140,8 @@ def create_app(
             cache_buster=time.time_ns(),
             refresh_interval=refresh_interval,
             demo_status=demo_service.status(),
+            motor_status=motor_status.to_dict(),
+            motor_config=motor_config,
         )
 
     @app.route("/camera/latest.jpg")
@@ -888,6 +1217,78 @@ def create_app(
             return jsonify(status), http_status
         return redirect(url_for("index"), code=303)
 
+    @app.route("/api/motor/status")
+    def motor_status():
+        status = motor_controller.get_status()
+        return jsonify(status.to_dict())
+
+    @app.route("/api/motor/config", methods=["GET"])
+    def motor_config_get():
+        return jsonify(motor_controller.config.to_dict())
+
+    @app.route("/api/motor/config", methods=["POST"])
+    @app.route("/motor/config", methods=["POST"])
+    def motor_config():
+        if request.is_json:
+            payload = request.get_json(silent=True) or {}
+        else:
+            payload = {}
+            for key in request.form:
+                value = request.form[key]
+                if value.lower() == "true":
+                    payload[key] = True
+                elif value.lower() == "false":
+                    payload[key] = False
+                else:
+                    try:
+                        payload[key] = int(value)
+                    except ValueError:
+                        payload[key] = value
+        motor_controller.update_config(payload)
+        if should_return_json():
+            return jsonify(motor_controller.config.to_dict())
+        return redirect(url_for("index"), code=303)
+
+    @app.route("/motor/open", methods=["POST"])
+    @app.route("/api/motor/open", methods=["POST"])
+    def motor_open():
+        success, message = motor_controller.open_motor()
+        if should_return_json():
+            return jsonify({"success": success, "message": message}), 200 if success else 500
+        return redirect(url_for("index"), code=303)
+
+    @app.route("/motor/close", methods=["POST"])
+    @app.route("/api/motor/close", methods=["POST"])
+    def motor_close():
+        success, message = motor_controller.close_motor()
+        if should_return_json():
+            return jsonify({"success": success, "message": message}), 200 if success else 500
+        return redirect(url_for("index"), code=303)
+
+    @app.route("/motor/test", methods=["POST"])
+    @app.route("/api/motor/test", methods=["POST"])
+    def motor_test():
+        success, message = motor_controller.test_connection()
+        if should_return_json():
+            return jsonify({"success": success, "message": message}), 200 if success else 500
+        return redirect(url_for("index"), code=303)
+
+    @app.route("/motor/emergency-stop", methods=["POST"])
+    @app.route("/api/motor/emergency-stop", methods=["POST"])
+    def motor_emergency_stop():
+        success, message = motor_controller.emergency_stop()
+        if should_return_json():
+            return jsonify({"success": success, "message": message}), 200 if success else 500
+        return redirect(url_for("index"), code=303)
+
+    @app.route("/motor/reset", methods=["POST"])
+    @app.route("/api/motor/reset", methods=["POST"])
+    def motor_reset():
+        success, message = motor_controller.reset()
+        if should_return_json():
+            return jsonify({"success": success, "message": message}), 200 if success else 500
+        return redirect(url_for("index"), code=303)
+
     return app
 
 
@@ -907,6 +1308,7 @@ def main() -> int:
         demo_serial_timeout=args.demo_serial_timeout,
         demo_serial_reset_delay=args.demo_serial_reset_delay,
         demo_force_simulation=args.demo_force_simulation,
+        motor_driver_config_file=args.motor_driver_config,
     )
     app.run(host=args.host, port=args.port)
     return 0
