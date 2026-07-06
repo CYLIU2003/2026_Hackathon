@@ -33,7 +33,7 @@ const int DEFAULT_HONEY_AMOUNT_PERCENT = 80;
 #define GODA_ACTUATOR_MODE_PCA9685 1
 #define GODA_ACTUATOR_MODE_DIRECT_SERVO 2
 
-// Haruka GODA/beehivemotorC++/0to90.ino uses a direct Servo.h motor on D3.
+// Haruka GODA/beehivemotorC++/0to90/0to90.ino uses a direct Servo.h motor on D3.
 // Change this to GODA_ACTUATOR_MODE_PCA9685 if the venue wiring uses PCA9685.
 #ifndef GODA_ACTUATOR_MODE
 #define GODA_ACTUATOR_MODE GODA_ACTUATOR_MODE_DIRECT_SERVO

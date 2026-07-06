@@ -3,7 +3,7 @@
 このファイルは **郷田さん** が、ラズパイ（画像認識用）が無い環境でも
 Arduino + サーボモーターの動作確認ができるように書かれています。
 
-2026-07-06 時点の既定は、郷田さんの最新 `Haruka GODA/beehivemotorC++/0to90.ino`
+2026-07-06 時点の既定は、郷田さんの最新 `Haruka GODA/beehivemotorC++/0to90/0to90.ino`
 に合わせた **D3 直結サーボ** です。PCA9685 を使う場合だけ `config.h` の
 `GODA_ACTUATOR_MODE` を `GODA_ACTUATOR_MODE_PCA9685` に変更してください。
 

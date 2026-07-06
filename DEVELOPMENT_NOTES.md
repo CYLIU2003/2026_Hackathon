@@ -2054,3 +2054,88 @@ Colab のデフォルト Python 3.12 + torch 2.11 環境で `onnxscript` が
 
 - 実会場では `http://192.168.137.128:8080` または `http://<pi-ip>:8080` を実ブラウザで開き、長時間表示でもCPU/メモリと映像更新が安定するか確認する。
 - 現在のデモは `MOCK_CONTACT=1` のため、実接触パッド統合時は Arduino Uno Q 側の contact confirmation を優先入力に切り替える。
+
+### 2026-07-06T19:58:35+09:00 — main_integra分岐とGODA 0to90統合
+
+担当: Codex
+
+目的:
+
+- 現在の `main` 内容を `main_integra` ブランチへ分岐し、Raspberry Piから
+  Arduino UnoへUSB serial接続して、Haruka GODA担当の0→90度サーボスケッチを
+  A1安全判断システムへ統合する。
+- `0to90.ino` がArduino IDE/arduino-cliで単独コンパイルできるよう、
+  1スケッチ1フォルダの配置へ直す。
+
+変更ファイル:
+
+- `Haruka GODA/beehivemotorC++/0to90/0to90.ino`
+- `Haruka GODA/beehivemotorC++/0to90.ino` (移動元)
+- `raspberry_pi/integration/safety_to_actuator.py`
+- `scripts/run_demo.sh`
+- `tests/test_safety_to_actuator.py`
+- `raspberry_pi/README.md`
+- `docs/GODA_ACTUATOR_INTEGRATION_INSTRUCTIONS_JP.md`
+- `arduino_uno_q/contact_pad_controller/README.md`
+- `arduino_uno_q/contact_pad_controller/config.h`
+- `DEVELOPMENT_NOTES.md`
+
+変更内容:
+
+- `main_integra` ブランチを新規作成。
+- `0to90.ino` を `Haruka GODA/beehivemotorC++/0to90/0to90.ino` へ移動し、
+  `beehivemotorC++.ino` と同一フォルダで `setup()` / `loop()` が衝突する問題を
+  解消。
+- `0to90.ino` に `SET AI_BEAR`、`SET PAW`、`SET HONEY`、`SET SAFE`、
+  `SET ESTOP`、`RESET`、`STATUS` の統合入力処理を追加。
+- Arduino側で蜂蜜量範囲、接触確認時間、system_safe、emergency_stop、
+  cooldown、`ERROR_SAFE` を確認してから、D3直結サーボを0度→90度→0度に動かす
+  構成にした。
+- Pi側 `safety_to_actuator.py` に `--command-profile goda-state` を追加。
+  `feeding_decision_log.csv` の最新行を `SET ...` コマンド列に変換してArduinoへ
+  送信する。
+- `scripts/run_demo.sh` に `ACTUATOR_BRIDGE_PROFILE` を追加し、
+  `ACTUATOR_BRIDGE_PROFILE=goda-state` で0to90統合経路を起動できるようにした。
+- safety bridgeの単体テストに、GODA state command生成とno-serial実行確認を追加。
+- Raspberry Pi READMEとGODA統合手順書に実行コマンド、配線、Arduino側安全確認の
+  位置づけを追記。
+
+安全・インターフェースへの影響:
+
+- 既定のbridge profileは従来互換の `release-stop` のまま。
+- `goda-state` ではPiがモーター角度を直接決めず、CSVの安全入力をArduinoへ
+  ミラーする。`0to90.ino` はArduino側で再度条件確認してから放出動作を行う。
+- 欠損・stale CSV・bridge例外時は `STOP` を送る。
+- `0to90.ino` は起動時・STOP・ERROR_SAFE・非常停止・低蜂蜜量・接触未確認で
+  サーボを閉状態 / `RELEASE_OFF` に保つ。
+- 実センサーは不要。今回の統合はCamera AI CSVまたは模擬入力を使うデモ経路。
+
+検証:
+
+- `python -m py_compile raspberry_pi/integration/safety_to_actuator.py` → 成功。
+- `bash -n scripts/run_demo.sh` → 成功。
+- `.venv/bin/python -m pytest tests/test_safety_to_actuator.py -q` →
+  `5 passed`。
+- `arduino-cli compile --fqbn arduino:avr:uno --build-path
+  /tmp/codex-goda-0to90-build 'Haruka GODA/beehivemotorC++/0to90'` →
+  成功。11712 bytes flash、1474 bytes RAM。
+- `arduino-cli compile --fqbn arduino:avr:uno --build-path
+  /tmp/codex-beehivemotor-l293d-build 'Haruka GODA/beehivemotorC++'` →
+  成功。3762 bytes flash、576 bytes RAM。
+- `/dev/ttyACM*` / `/dev/ttyUSB*` を確認したが、この実行環境ではArduino Unoの
+  serial portは見えていなかったため、実機USB疎通は未実施。
+
+結果:
+
+- `main_integra` 上で、Raspberry Pi safety CSV → USB serial →
+  Arduino Uno `0to90.ino` → D3サーボの統合経路を実装・検証した。
+- 既存の `beehivemotorC++.ino` と新しい `0to90/0to90.ino` の両方が
+  Uno向けにコンパイル可能になった。
+
+残課題:
+
+- Raspberry Pi実機とArduino Uno実機をUSB接続し、
+  `/dev/ttyACM0` で `ACTUATOR_BRIDGE_PROFILE=goda-state` の送受信を確認する。
+- サーボの実機可動範囲、外部電源容量、GND共通、機構干渉を現物で確認する。
+- 0to90統合スケッチはUno RAM使用率が約71%のため、今後フィールド追加時は
+  メモリ使用量に注意する。

@@ -282,6 +282,11 @@ python3 raspberry_pi/integration/fake_bear_to_actuator.py --no-serial --loop
 `RELEASE` と `TEST` はデモ用の模擬入力ショートカットであり、`ERROR_SAFE`
 を解除しない。エラー復帰は `RESET` だけで行う。
 
+`Haruka GODA/beehivemotorC++/0to90/0to90.ino` は、Raspberry Pi から送られる
+`SET ...` 入力を受け取り、Arduino側でも同じ条件を確認してから
+D3直結サーボを 0度 → 90度 → 0度 に動かす。`ERROR_SAFE`、非常停止、
+低蜂蜜量、接触未確認では閉状態を維持する。
+
 ---
 
 ## 9. 動作確認手順
@@ -350,6 +355,21 @@ python3 raspberry_pi/integration/fake_bear_to_actuator.py --port /dev/ttyACM0 --
 
 最後に、仮想AIスクリプトを実際の `raspberry_pi/camera_ai/run_camera_ai.py` へ置き換える。  
 このとき、YOLO単独では放出させず、必ずArduino側の安全判定を通す。
+
+`0to90.ino` をArduino Unoへ書き込んで使う場合は、Raspberry Pi上で次を実行する。
+
+```bash
+RUN_CAMERA_AI_INFERENCE=1 \
+RUN_ACTUATOR_BRIDGE=1 \
+ACTUATOR_BRIDGE_PROFILE=goda-state \
+SERIAL_PORT=/dev/ttyACM0 \
+./scripts/run_demo.sh
+```
+
+`ACTUATOR_BRIDGE_PROFILE=goda-state` は、`feeding_decision_log.csv` の最新行を
+`SET AI_BEAR`, `SET PAW`, `SET HONEY`, `SET SAFE`, `SET ESTOP` に変換して
+Arduinoへ送る。Piが直接モーター角度を決めるのではなく、Arduinoの
+`0to90.ino` が安全入力を再確認してからサーボを動かす。
 
 ---
 

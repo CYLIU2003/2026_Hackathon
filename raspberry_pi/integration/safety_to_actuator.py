@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Bridge presentation safety decisions to the Arduino actuator sketch.
 
-This process watches the Raspberry Pi safety mirror CSV. When the latest row is
-fresh and says RELEASE_ON, it sends RELEASE to the Arduino. On RELEASE_OFF,
-missing data, stale data, or any read/serial error, it sends STOP or stays safe.
+This process watches the Raspberry Pi safety mirror CSV. In the default
+release-stop profile, a fresh RELEASE_ON row sends RELEASE to the Arduino and
+missing/stale/error data sends STOP or stays safe. In the goda-state profile,
+the bridge mirrors the latest CSV fields as SET commands for
+Haruka GODA/beehivemotorC++/0to90/0to90.ino, so Arduino still checks the safety
+conditions before moving the servo.
 
 The Arduino contact_pad_controller still owns the field-side state machine and
 timeout/cooldown behavior. This bridge is only a demo integration path.
@@ -22,6 +25,8 @@ from pathlib import Path
 from typing import Optional
 
 JST = timezone(timedelta(hours=9))
+COMMAND_PROFILE_RELEASE_STOP = "release-stop"
+COMMAND_PROFILE_GODA_STATE = "goda-state"
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,21 @@ def now_jst_iso() -> str:
 
 def parse_bool(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def parse_int(value: object, default: int) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def bool_from_row(row: dict, *field_names: str, default: bool = False) -> bool:
+    for field_name in field_names:
+        value = row.get(field_name)
+        if value is not None and str(value).strip() != "":
+            return parse_bool(value)
+    return default
 
 
 def latest_csv_row(path: Path) -> Optional[dict]:
@@ -78,6 +98,72 @@ def read_latest_decision(path: Path, stale_timeout_sec: float) -> LatestDecision
         or str(row.get("servo_command", "")).strip() == "RELEASE"
     )
     return LatestDecision(True, should_release, "latest decision read", row)
+
+
+def build_goda_state_commands(decision: LatestDecision) -> list[str]:
+    """Build safe SET commands for Haruka GODA/beehivemotorC++/0to90/0to90.ino.
+
+    The 0to90 sketch keeps the final actuator gate on Arduino: Raspberry Pi only
+    mirrors the latest safety CSV fields as simulated inputs.
+    """
+
+    if not decision.ok:
+        return ["STOP"]
+
+    row = decision.row
+    state = str(row.get("state", "")).strip()
+    emergency_stop = bool_from_row(row, "emergency_stop")
+    bear_detected = bool_from_row(row, "bear_detected", "ai_bear_detected")
+    paw_contact = bool_from_row(row, "paw_contact", "contact_detected", "contact_confirmed")
+    honey_amount_percent = parse_int(row.get("honey_amount_percent"), 0)
+    system_safe = bool_from_row(row, "system_safe", default=False)
+
+    if state == "ERROR_SAFE":
+        system_safe = False
+
+    commands: list[str] = []
+    if emergency_stop or state == "ERROR_SAFE":
+        commands.append("STOP")
+    else:
+        commands.extend(["TEST_AUTO_OFF", "RESET"])
+
+    commands.extend(
+        [
+            f"SET AI_BEAR {1 if bear_detected else 0}",
+            f"SET PAW {1 if paw_contact else 0}",
+            f"SET HONEY {honey_amount_percent}",
+            f"SET SAFE {1 if system_safe else 0}",
+            f"SET ESTOP {1 if emergency_stop else 0}",
+            "STATUS",
+        ]
+    )
+    return commands
+
+
+def goda_state_fingerprint(decision: LatestDecision) -> str:
+    if not decision.ok:
+        return json.dumps(
+            {
+                "ok": False,
+                "message": decision.message,
+            },
+            sort_keys=True,
+        )
+
+    row = decision.row
+    values = {
+        "ok": True,
+        "state": row.get("state", ""),
+        "event": row.get("event", ""),
+        "release_state": row.get("release_state", ""),
+        "servo_command": row.get("servo_command", ""),
+        "bear_detected": bool_from_row(row, "bear_detected", "ai_bear_detected"),
+        "paw_contact": bool_from_row(row, "paw_contact", "contact_detected", "contact_confirmed"),
+        "honey_amount_percent": parse_int(row.get("honey_amount_percent"), 0),
+        "system_safe": bool_from_row(row, "system_safe", default=False),
+        "emergency_stop": bool_from_row(row, "emergency_stop"),
+    }
+    return json.dumps(values, sort_keys=True)
 
 
 class ArduinoCommandClient:
@@ -148,6 +234,7 @@ def emit_bridge_record(
     event: str,
     desired_release: bool,
     command: str,
+    commands: list[str],
     serial_status: str,
     message: str,
     row: dict,
@@ -158,6 +245,7 @@ def emit_bridge_record(
         "event": event,
         "desired_release": desired_release,
         "serial_command": command,
+        "serial_commands": commands,
         "serial_status": serial_status,
         "message": message,
         "safety_state": row.get("state", ""),
@@ -199,6 +287,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-serial", action="store_true")
     parser.add_argument("--once", action="store_true")
     parser.add_argument(
+        "--command-profile",
+        choices=(COMMAND_PROFILE_RELEASE_STOP, COMMAND_PROFILE_GODA_STATE),
+        default=COMMAND_PROFILE_RELEASE_STOP,
+        help=(
+            "release-stop sends RELEASE/STOP; goda-state sends SET input values "
+            "for Haruka GODA/beehivemotorC++/0to90/0to90.ino."
+        ),
+    )
+    parser.add_argument(
         "--reset-before-release",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -224,6 +321,7 @@ def main() -> int:
         no_serial=args.no_serial,
     )
     last_desired_release: Optional[bool] = None
+    last_command_fingerprint: Optional[str] = None
 
     try:
         if args.stop_on_start:
@@ -236,6 +334,7 @@ def main() -> int:
                 event="STARTUP_STOP",
                 desired_release=False,
                 command=command,
+                commands=[command] if command else [],
                 serial_status=status,
                 message="startup stop sent",
                 row={},
@@ -247,16 +346,23 @@ def main() -> int:
 
             commands: list[str] = []
             event = "NO_CHANGE"
-            if desired_release and last_desired_release is not True:
-                event = "SEND_RELEASE"
-                if args.reset_before_release:
-                    commands.extend(["TEST_AUTO_OFF", "RESET"])
-                commands.append("RELEASE")
-            elif not desired_release and last_desired_release is True:
-                event = "SEND_STOP"
-                commands.append("STOP")
-            elif not decision.ok and last_desired_release is None:
-                event = "SAFE_NO_DATA"
+            if args.command_profile == COMMAND_PROFILE_GODA_STATE:
+                fingerprint = goda_state_fingerprint(decision)
+                if fingerprint != last_command_fingerprint or args.once:
+                    commands = build_goda_state_commands(decision)
+                    event = "SEND_GODA_STATE" if decision.ok else "SEND_STOP"
+                last_command_fingerprint = fingerprint
+            else:
+                if desired_release and last_desired_release is not True:
+                    event = "SEND_RELEASE"
+                    if args.reset_before_release:
+                        commands.extend(["TEST_AUTO_OFF", "RESET"])
+                    commands.append("RELEASE")
+                elif not desired_release and last_desired_release is True:
+                    event = "SEND_STOP"
+                    commands.append("STOP")
+                elif not decision.ok and last_desired_release is None:
+                    event = "SAFE_NO_DATA"
 
             serial_status = "NO_COMMAND"
             command = ""
@@ -272,6 +378,7 @@ def main() -> int:
                     event=event,
                     desired_release=desired_release,
                     command=command,
+                    commands=commands,
                     serial_status=serial_status,
                     message=decision.message,
                     row=decision.row,
@@ -292,6 +399,7 @@ def main() -> int:
             event="BRIDGE_ERROR",
             desired_release=False,
             command="STOP",
+            commands=["STOP"],
             serial_status="ERROR",
             message=str(exc),
             row={},

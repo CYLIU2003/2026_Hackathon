@@ -14,6 +14,7 @@ RUN_SERIAL_LOGGER="${RUN_SERIAL_LOGGER:-0}"
 RUN_DASHBOARD="${RUN_DASHBOARD:-1}"
 RUN_ACTUATOR_BRIDGE="${RUN_ACTUATOR_BRIDGE:-0}"
 ACTUATOR_BRIDGE_NO_SERIAL="${ACTUATOR_BRIDGE_NO_SERIAL:-0}"
+ACTUATOR_BRIDGE_PROFILE="${ACTUATOR_BRIDGE_PROFILE:-release-stop}"
 CAMERA_AI_MODEL="${CAMERA_AI_MODEL:-}"
 CAMERA_AI_FALLBACK_ON_CRASH="${CAMERA_AI_FALLBACK_ON_CRASH:-1}"
 ALLOW_NCNN_INFERENCE="${ALLOW_NCNN_INFERENCE:-0}"
@@ -202,6 +203,7 @@ if [[ "${RUN_ACTUATOR_BRIDGE}" == "1" ]]; then
     --input "${LOG_DIR}/feeding_decision_log.csv" \
     --port "${SERIAL_PORT}" \
     --baudrate "${BAUDRATE}" \
+    --command-profile "${ACTUATOR_BRIDGE_PROFILE}" \
     "${actuator_bridge_args[@]}" \
     >> "${LOG_DIR}/actuator_bridge.status.log" 2>&1 &
   child_pids+=("$!")

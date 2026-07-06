@@ -49,6 +49,24 @@ The actuator bridge sends `RELEASE` only when the latest safety CSV row is fresh
 and says `RELEASE_ON`. Missing/stale data, `ERROR_SAFE`, or emergency stop keeps
 the bridge on `STOP`.
 
+For Haruka GODA's direct-servo sketch
+`Haruka GODA/beehivemotorC++/0to90/0to90.ino`, upload that sketch to Arduino Uno,
+connect the servo signal to D3, power the servo from an external 5V-6V supply
+with common GND, then run:
+
+```bash
+RUN_CAMERA_AI_INFERENCE=1 \
+RUN_ACTUATOR_BRIDGE=1 \
+ACTUATOR_BRIDGE_PROFILE=goda-state \
+SERIAL_PORT=/dev/ttyACM0 \
+./scripts/run_demo.sh
+```
+
+`goda-state` sends the latest CSV safety fields as `SET AI_BEAR`, `SET PAW`,
+`SET HONEY`, `SET SAFE`, and `SET ESTOP`. The Arduino sketch still checks those
+conditions, confirms contact, applies cooldown, and defaults to closed /
+`RELEASE_OFF`.
+
 Open the dashboard:
 
 ```text
